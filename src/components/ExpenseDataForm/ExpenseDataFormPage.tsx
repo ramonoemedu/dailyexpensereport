@@ -23,6 +23,7 @@ import dayjs from "dayjs";
 import { dateFields } from "@/utils/KeySanitizer";
 import { ExpenseDataTable } from "./ExpenseDataTable";
 import { cn } from "@/lib/NextAdmin/utils";
+import { refineDescription, getSmartSuggestions } from "@/utils/DescriptionHelper";
 
 type Props = {
   columns: string[];
@@ -42,6 +43,8 @@ type Props = {
   openDetailDialog: (row: any) => void;
   uniqueDescriptions?: string[];
   handleDeactivate: (id: string) => void;
+  sendToTelegram?: boolean;
+  setSendToTelegram?: (val: boolean) => void;
 };
 
 const FormField = ({
@@ -77,8 +80,12 @@ const ExpenseDataFormPage: React.FC<Props> = ({
   saving,
   uniqueDescriptions = [],
   handleDeactivate,
+  sendToTelegram,
+  setSendToTelegram,
 }) => {
   const descriptionRef = React.useRef<HTMLInputElement>(null);
+  const [showSuggestions, setShowSuggestions] = React.useState(false);
+  const [suggestions, setSuggestions] = React.useState<string[]>([]);
 
   // Auto-focus description when dialog opens or after a save (indicated by form clearing)
   React.useEffect(() => {
@@ -91,6 +98,28 @@ const ExpenseDataFormPage: React.FC<Props> = ({
     }
   }, [dialogOpen, editIndex, saving, form["Description"]]);
 
+  const handleDescChange = (val: string) => {
+    handleChange("Description", val);
+    if (val.length > 0) {
+      const filtered = getSmartSuggestions(val, uniqueDescriptions);
+      setSuggestions(filtered);
+      setShowSuggestions(filtered.length > 0);
+    } else {
+      setShowSuggestions(false);
+    }
+  };
+
+  const handleDescBlur = () => {
+    // Delay to allow suggestion click
+    setTimeout(() => {
+      setShowSuggestions(false);
+      const refined = refineDescription(form["Description"] || "");
+      if (refined !== form["Description"]) {
+        handleChange("Description", refined);
+      }
+    }, 200);
+  };
+
   return (
     <div className="w-full">
       <ExpenseDataTable
@@ -100,12 +129,6 @@ const ExpenseDataFormPage: React.FC<Props> = ({
         openDetailDialog={openDetailDialog}
         handleDeactivate={handleDeactivate}
       />
-
-      <datalist id="description-suggestions">
-        {uniqueDescriptions.map((desc) => (
-          <option key={desc} value={desc} />
-        ))}
-      </datalist>
 
       <Tooltip title="Add Entry">
         <Fab
@@ -182,13 +205,14 @@ const ExpenseDataFormPage: React.FC<Props> = ({
                     if (col === "Credit" || col === "Date" || col === "Category") return null;
 
                     const isDebit = col === "Debit";
+                    const isDescription = col === "Description";
                     const label = isDebit ? "Amount" : col;
                     const valueKey = isDebit ? "Amount (Income/Expense)" : col;
 
                     let options = dropdownOptions[col];
 
                     return (
-                      <FormField key={col} label={label}>
+                      <FormField key={col} label={label} className={isDescription ? "relative" : ""}>
                         {options ? (
                           <select
                             value={form[valueKey] || "Expense"}
@@ -201,15 +225,40 @@ const ExpenseDataFormPage: React.FC<Props> = ({
                             ))}
                           </select>
                         ) : (
-                          <input
-                            ref={col === "Description" ? descriptionRef : undefined}
-                            type="text"
-                            value={form[valueKey] || ""}
-                            onChange={(e) => handleChange(valueKey, e.target.value)}
-                            placeholder={`Enter ${label.toLowerCase()}`}
-                            list={col === "Description" ? "description-suggestions" : undefined}
-                            className="w-full rounded-xl border border-stroke bg-gray-2 px-4 py-2.5 text-sm text-dark outline-none transition-all focus:border-primary focus:ring-4 focus:ring-primary/10 dark:border-dark-3 dark:bg-dark-2 dark:text-white dark:focus:border-primary"
-                          />
+                          <>
+                            <input
+                              ref={isDescription ? descriptionRef : undefined}
+                              type="text"
+                              value={form[valueKey] || ""}
+                              onChange={(e) => isDescription ? handleDescChange(e.target.value) : handleChange(valueKey, e.target.value)}
+                              onBlur={isDescription ? handleDescBlur : undefined}
+                              onInput={(e) => {
+                                if (isDebit) {
+                                  (e.target as HTMLInputElement).value = (e.target as HTMLInputElement).value.replace(/[^0-9.,]/g, '');
+                                }
+                              }}
+                              autoComplete="off"
+                              placeholder={`Enter ${label.toLowerCase()}`}
+                              className="w-full rounded-xl border border-stroke bg-gray-2 px-4 py-2.5 text-sm text-dark outline-none transition-all focus:border-primary focus:ring-4 focus:ring-primary/10 dark:border-dark-3 dark:bg-dark-2 dark:text-white dark:focus:border-primary"
+                            />
+                            {isDescription && showSuggestions && (
+                              <div className="absolute left-0 top-full z-[999] mt-1 w-full rounded-xl border border-stroke bg-white py-2 shadow-lg dark:border-dark-3 dark:bg-dark-2">
+                                {suggestions.map((s, i) => (
+                                  <button
+                                    key={i}
+                                    type="button"
+                                    className="w-full px-4 py-2 text-left text-sm text-dark hover:bg-primary/5 hover:text-primary dark:text-white"
+                                    onClick={() => {
+                                      handleChange("Description", s);
+                                      setShowSuggestions(false);
+                                    }}
+                                  >
+                                    {s}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </>
                         )}
                       </FormField>
                     );
@@ -235,6 +284,23 @@ const ExpenseDataFormPage: React.FC<Props> = ({
                       }}
                     />
                   </FormField>
+
+                  {/* Telegram Notification Checkbox */}
+                  {setSendToTelegram && (
+                    <div className="flex items-center gap-3 sm:col-span-2 mt-2 p-3 rounded-xl bg-gray-50 border border-stroke dark:bg-dark-2 dark:border-dark-3">
+                      <input
+                        id="telegram-checkbox"
+                        type="checkbox"
+                        checked={sendToTelegram}
+                        onChange={(e) => setSendToTelegram(e.target.checked)}
+                        className="h-5 w-5 rounded border-gray-300 text-primary focus:ring-primary dark:border-dark-4 dark:bg-dark-3"
+                      />
+                      <label htmlFor="telegram-checkbox" className="select-none text-sm font-medium text-dark dark:text-white cursor-pointer flex items-center gap-2">
+                        <span>Send notification to Telegram</span>
+                        <span className="text-xs text-dark-5 bg-gray-200 dark:bg-dark-3 px-1.5 py-0.5 rounded">Bot Connected</span>
+                      </label>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

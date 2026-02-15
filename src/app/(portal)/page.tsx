@@ -103,9 +103,9 @@ export default function DashboardPage() {
           />
 
           <OverviewCard
-            label="Monthly Income"
+            label="Income (Current / Total)"
             data={{
-              value: `$${stats.monthlyIncome.toLocaleString()}`,
+              value: `$${stats.monthlyIncome.toLocaleString()} / $${stats.monthlyIncomeWithFuture?.toLocaleString() ?? 0}`,
               growthRate: 0,
             }}
             Icon={ProfitIcon}
@@ -119,6 +119,54 @@ export default function DashboardPage() {
             }}
             Icon={UsersIcon}
           />
+        </div>
+
+        {/* Income Breakdown Table */}
+        <div className="rounded-[10px] bg-white p-6 shadow-1 dark:bg-dark-2">
+          <div className="mb-4 flex items-center justify-between">
+            <h3 className="text-xl font-bold text-dark dark:text-white">Monthly Income Breakdown</h3>
+            <div className="text-right">
+              <p className="text-sm font-medium text-dark-6">Current: <span className="text-dark dark:text-white">${stats.monthlyIncome.toLocaleString()}</span></p>
+              <p className="text-sm font-medium text-dark-6">Full Month: <span className="text-dark dark:text-white">${stats.monthlyIncomeWithFuture.toLocaleString()}</span></p>
+            </div>
+          </div>
+          <div className="max-w-full overflow-x-auto">
+            <table className="w-full table-auto">
+              <thead>
+                <tr className="bg-gray-2 text-left dark:bg-meta-4">
+                  <th className="px-4 py-4 font-medium text-black dark:text-white">Date</th>
+                  <th className="px-4 py-4 font-medium text-black dark:text-white">Description</th>
+                  <th className="px-4 py-4 font-medium text-black dark:text-white">Amount</th>
+                  <th className="px-4 py-4 font-medium text-black dark:text-white">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stats.monthlyIncomeItems?.map((item: any, index: number) => (
+                  <tr key={index} className={item.isFuture ? "opacity-60 bg-gray-50 dark:bg-dark-3" : ""}>
+                    <td className="border-b border-[#eee] px-4 py-5 dark:border-strokedark">
+                      <p className="text-black dark:text-white">{item.date}</p>
+                    </td>
+                    <td className="border-b border-[#eee] px-4 py-5 dark:border-strokedark">
+                      <p className="text-black dark:text-white">{item.description}</p>
+                    </td>
+                    <td className="border-b border-[#eee] px-4 py-5 dark:border-strokedark">
+                      <p className="text-black dark:text-white">${item.amount.toLocaleString()}</p>
+                    </td>
+                    <td className="border-b border-[#eee] px-4 py-5 dark:border-strokedark">
+                      <span className={`inline-flex rounded-full px-3 py-1 text-xs font-medium ${item.isFuture ? "bg-warning/10 text-warning" : "bg-success/10 text-success"}`}>
+                        {item.isFuture ? "Future" : "Received"}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+                {(!stats.monthlyIncomeItems || stats.monthlyIncomeItems.length === 0) && (
+                  <tr>
+                    <td colSpan={4} className="px-4 py-10 text-center text-dark-6">No income recorded for this month.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
 
         {/* Yearly Summary Card */}

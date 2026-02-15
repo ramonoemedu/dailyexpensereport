@@ -57,6 +57,7 @@ export default function DailyExpenseRoute() {
   const [typeFilter, setTypeFilter] = useState<string>("All");
   const [month, setMonth] = useState(new Date().getMonth());
   const [year, setYear] = useState(new Date().getFullYear());
+  const [sendToTelegram, setSendToTelegram] = useState(true);
 
   const [detailId, setDetailId] = useState<string | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
@@ -88,6 +89,7 @@ export default function DailyExpenseRoute() {
   const openAddDialog = () => {
     setForm(initialForm);
     setEditIndex(null);
+    setSendToTelegram(true);
     setDialogOpen(true);
   };
 
@@ -104,6 +106,7 @@ export default function DailyExpenseRoute() {
 
     setForm(formWithDefaults);
     setEditIndex(idx);
+    setSendToTelegram(true);
     setDialogOpen(true);
   };
 
@@ -114,18 +117,52 @@ export default function DailyExpenseRoute() {
   };
 
   const handleDialogSave = async () => {
+    // Validation
+    const description = form["Description"]?.trim();
+    const amountStr = form["Amount (Income/Expense)"]?.toString().trim();
+
+    if (!description) {
+      showToast("Description is required.", "error");
+      return;
+    }
+
+    if (!amountStr) {
+      showToast("Amount is required.", "error");
+      return;
+    }
+
+    // Replace comma with dot and parse
+    const normalizedAmount = amountStr.replace(/,/g, ".");
+    const amount = parseFloat(normalizedAmount);
+
+    if (isNaN(amount)) {
+      showToast("Amount must be a valid number.", "error");
+      return;
+    }
+
+    if (amount === 0) {
+      showToast("Amount cannot be zero.", "error");
+      return;
+    }
+
     const sanitizedForm: Record<string, any> = {};
     for (const [key, value] of Object.entries(form)) {
       if (value !== undefined) {
         const val = dateFields.includes(key) && value ? dayjs(value).format("YYYY-MM-DD") : value;
         // Map UI key to Firestore key
         const firestoreKey = key === "Amount (Income/Expense)" ? "Amount" : sanitizeKey(key);
-        sanitizedForm[firestoreKey] = val;
+        
+        // Use normalized amount for the Amount field
+        if (firestoreKey === "Amount") {
+          sanitizedForm[firestoreKey] = amount;
+        } else {
+          sanitizedForm[firestoreKey] = val;
+        }
       }
     }
 
     const id = editIndex !== null ? (rows[editIndex].id as string) : null;
-    const success = await saveEntry(id, sanitizedForm);
+    const success = await saveEntry(id, sanitizedForm, sendToTelegram);
 
     if (success) {
       showToast(editIndex !== null ? "Entry updated successfully!" : "Entry created successfully!", "success");
@@ -312,6 +349,8 @@ export default function DailyExpenseRoute() {
                 dropdownOptions={dropdownOptions}
                 uniqueDescriptions={uniqueDescriptions}
                 handleDeactivate={onDeactivate}
+                sendToTelegram={sendToTelegram}
+                setSendToTelegram={setSendToTelegram}
               />
 
               <ExpenseDetail

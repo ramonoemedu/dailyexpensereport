@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { db } from "@/lib/firebase";
 import dayjs from "dayjs";
+
 import {
   collection,
   addDoc,
@@ -14,6 +15,7 @@ import {
   orderBy,
 } from "firebase/firestore";
 import { PAGE_SIZE, sanitizeKey, unsanitizeKey } from "@/utils/KeySanitizer";
+import { sendTelegramNotification, formatExpenseMessage } from "@/utils/telegramService";
 
 export function useExpenseData() {
   const [allRows, setAllRows] = useState<Record<string, any>[]>([]);
@@ -117,6 +119,12 @@ export function useExpenseData() {
       if (row.status === 'inactive') return;
 
       const date = dayjs(row.Date);
+      // Skip future dates for stats
+      if (date.isAfter(dayjs(), 'day')) {
+        console.log(`Skipping future date: ${row.Date} (${row.Description})`);
+        return;
+      }
+
       const amount = Math.abs(parseFloat(row["Amount (Income/Expense)"] || row["Amount"] || 0));
       const isIncome = row.Type === 'Income';
 
@@ -191,30 +199,54 @@ export function useExpenseData() {
     fetchSettings();
   }, []);
 
-  const saveEntry = async (id: string | null, data: Record<string, any>) => {
-    setSaving(true);
-    try {
-      if (id) {
-        await updateDoc(doc(db, "expenses", id), data);
-      } else {
-        // Ensure new entries are active and have createdAt
-        await addDoc(collection(db, "expenses"), { 
-          ...data, 
-          status: 'active',
-          createdAt: new Date().toISOString()
-        });
+    const saveEntry = async (id: string | null, data: Record<string, any>, sendNotification: boolean = true) => {
+      setSaving(true);
+      try {
+        if (id) {
+          await updateDoc(doc(db, "expenses", id), data);
+        } else {
+          // Ensure new entries are active and have createdAt
+          await addDoc(collection(db, "expenses"), { 
+            ...data, 
+            status: 'active',
+            createdAt: new Date().toISOString()
+          });
+        }
+  
+        // Send Telegram Notification if enabled
+        if (sendNotification) {
+          const message = formatExpenseMessage(
+            id ? 'Updated' : 'Created',
+            data,
+            stats
+          );
+          await sendTelegramNotification(message);
+        }
+  
+        // Re-fetch everything immediately to update the list
+        await fetchAllData();
+        return true;
+      } catch (err: any) {
+        console.error("Error saving entry:", err);
+        
+        // Send Error Notification to Telegram (Always send errors if possible, or maybe respect flag? Let's respect flag for user actions, but errors are system level. But for now, let's keep error reporting active or respect flag? 
+        // User likely wants to toggle the "Success" report. I'll stick to respecting the flag for the main message, but maybe suppress error if flag is off? 
+        // Actually, if I uncheck "Send to Telegram", I probably don't want any noise.
+        
+              if (sendNotification) {
+                const errorMessage = formatExpenseMessage(
+                  'Error',
+                  data,
+                  stats,
+                  err.message
+                );
+                await sendTelegramNotification(errorMessage, true);
+              }  
+        return false;
+      } finally {
+        setSaving(false);
       }
-      // Re-fetch everything immediately to update the list
-      await fetchAllData();
-      return true;
-    } catch (err) {
-      console.error("Error saving entry:", err);
-      return false;
-    } finally {
-      setSaving(false);
-    }
-  };
-
+    };
   const deactivateEntry = async (id: string) => {
     try {
       await updateDoc(doc(db, "expenses", id), { status: 'inactive' });

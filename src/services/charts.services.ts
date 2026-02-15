@@ -21,12 +21,15 @@ export async function getClearPortStats(month?: number, year?: number) {
   try {
     const snapshot = await getDocs(collection(db, "expenses"));
     const now = new Date();
+    now.setHours(23, 59, 59, 999);
     const targetMonth = month !== undefined ? month : now.getMonth();
     const targetYear = year !== undefined ? year : now.getFullYear();
     
     let monthlyTransactions = 0;
     let monthlyAmount = 0;
     let monthlyIncome = 0;
+    let monthlyIncomeWithFuture = 0;
+    let monthlyIncomeItems: any[] = [];
     let maxExpense = 0;
     
     let yearlyIncome = 0;
@@ -37,9 +40,30 @@ export async function getClearPortStats(month?: number, year?: number) {
     snapshot.docs.forEach(doc => {
       const data = doc.data();
       const date = new Date(data[sanitizeKey("Date")] || data["Date"]);
+      const isFuture = date > now;
+
       const amount = Math.abs(parseFloat(data[sanitizeKey("Amount")] || data["Amount"] || "0"));
       const isIncome = data["Type"] === "Income";
       const category = autoCategorize(data["Description"] || "", data["Category"]);
+
+      // Calculate Monthly Income with Future (Always include)
+      if (date.getMonth() === targetMonth && date.getFullYear() === targetYear) {
+        if (isIncome) {
+          monthlyIncomeWithFuture += amount;
+          monthlyIncomeItems.push({
+            date: data[sanitizeKey("Date")] || data["Date"],
+            description: data["Description"] || "No Description",
+            amount,
+            isFuture
+          });
+          if (!isFuture) {
+            monthlyIncome += amount;
+          }
+        }
+      }
+
+      // Skip future dates for standard stats
+      if (isFuture) return;
 
       // Yearly totals
       if (date.getFullYear() === targetYear) {
@@ -61,6 +85,9 @@ export async function getClearPortStats(month?: number, year?: number) {
       }
     });
 
+    // Sort income items by date
+    monthlyIncomeItems.sort((a, b) => a.date.localeCompare(b.date));
+
     const topCategory = Object.entries(categoryTotals)
       .sort(([, a], [, b]) => b - a)[0]?.[0] || "None";
 
@@ -68,6 +95,8 @@ export async function getClearPortStats(month?: number, year?: number) {
       monthlyTransactions,
       monthlyAmount,
       monthlyIncome,
+      monthlyIncomeWithFuture,
+      monthlyIncomeItems,
       maxExpense,
       yearlyIncome,
       yearlyExpense,
@@ -79,7 +108,7 @@ export async function getClearPortStats(month?: number, year?: number) {
   } catch (error) {
     console.error("Error fetching expense stats:", error);
     return {
-      monthlyTransactions: 0, monthlyAmount: 0, monthlyIncome: 0,
+      monthlyTransactions: 0, monthlyAmount: 0, monthlyIncome: 0, monthlyIncomeWithFuture: 0,
       maxExpense: 0, yearlyIncome: 0, yearlyExpense: 0,
       topCategory: "None", targetMonth: 0, targetYear: 2026,
       growth: { total: 0, amount: 0 }
@@ -97,11 +126,16 @@ export async function getClearanceTimelineData(year?: number) {
     const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     months.forEach(m => { incomeMonthly[m] = 0; expenseMonthly[m] = 0; });
 
+    const now = new Date();
+    now.setHours(23, 59, 59, 999);
     snapshot.docs.forEach(doc => {
       const data = doc.data();
       const dateStr = data[sanitizeKey("Date")] || data["Date"];
       if (dateStr) {
         const date = new Date(dateStr);
+        // Skip future dates for stats
+        if (date > now) return;
+
         if (date.getFullYear() === targetYear) {
           const month = months[date.getMonth()];
           const amount = Math.abs(parseFloat(data[sanitizeKey("Amount")] || data["Amount"] || "0"));
@@ -125,6 +159,7 @@ export async function getWeeksProfitData(month?: number, year?: number) {
   try {
     const snapshot = await getDocs(collection(db, "expenses"));
     const now = new Date();
+    now.setHours(23, 59, 59, 999);
     const targetMonth = month !== undefined ? month : now.getMonth();
     const targetYear = year !== undefined ? year : now.getFullYear();
     const categoryTotals: Record<string, number> = {};
@@ -132,6 +167,9 @@ export async function getWeeksProfitData(month?: number, year?: number) {
     snapshot.docs.forEach(doc => {
       const data = doc.data();
       const date = new Date(data[sanitizeKey("Date")] || data["Date"]);
+      // Skip future dates for stats
+      if (date > now) return;
+
       if (date.getMonth() === targetMonth && date.getFullYear() === targetYear) {
         if (data["Type"] !== "Income") {
           const category = autoCategorize(data["Description"] || "", data["Category"]);
