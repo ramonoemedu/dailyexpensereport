@@ -73,9 +73,7 @@ export async function getClearPortStats(month?: number, year?: number) {
 
       // Monthly totals
       if (date.getMonth() === targetMonth && date.getFullYear() === targetYear) {
-        if (isIncome) {
-          monthlyIncome += amount;
-        } else {
+        if (!isIncome) {
           monthlyTransactions++;
           monthlyAmount += amount;
           if (amount > maxExpense) maxExpense = amount;
