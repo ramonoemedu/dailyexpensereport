@@ -7,8 +7,8 @@ import { useTheme } from "next-themes";
 
 type PropsType = {
   data: {
-    received: { x: unknown; y: number }[];
-    due: { x: unknown; y: number }[];
+    income: { x: unknown; y: number }[];
+    expense: { x: unknown; y: number }[];
   };
 };
 
