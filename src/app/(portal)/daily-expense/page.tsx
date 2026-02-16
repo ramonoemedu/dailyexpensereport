@@ -217,28 +217,28 @@ export default function DailyExpenseRoute() {
 
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
           <OverviewCard
-            label="Weekly Expense"
-            data={{ value: `$${stats.weeklyExpense.toLocaleString()}`, growthRate: 0 }}
-            Icon={ExpenseIcon}
-          />
-          <OverviewCard
-            label="Weekly Balance"
-            data={{ value: `$${(stats.weeklyIncome - stats.weeklyExpense).toLocaleString()}`, growthRate: 0 }}
+            label="Starting Balance"
+            data={{ value: `$${stats.startingBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, growthRate: 0 }}
             Icon={BalanceIcon}
           />
           <OverviewCard
             label={`${months[month]} Income`}
-            data={{ value: `$${stats.monthlyIncome.toLocaleString()}`, growthRate: 0 }}
+            data={{ value: `$${stats.monthlyIncome.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, growthRate: 0 }}
             Icon={IncomeIcon}
           />
           <OverviewCard
             label={`${months[month]} Expense`}
-            data={{ value: `$${stats.monthlyExpense.toLocaleString()}`, growthRate: 0 }}
+            data={{ value: `$${stats.monthlyExpense.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, growthRate: 0 }}
             Icon={ExpenseIcon}
           />
           <OverviewCard
-            label={`${months[month]} Balance`}
-            data={{ value: `$${(stats.monthlyIncome - stats.monthlyExpense).toLocaleString()}`, growthRate: 0 }}
+            label="Monthly Profit/Loss"
+            data={{ value: `${(stats.monthlyIncome - stats.monthlyExpense) >= 0 ? '+' : ''}$${(stats.monthlyIncome - stats.monthlyExpense).toLocaleString(undefined, { minimumFractionDigits: 2 })}`, growthRate: 0 }}
+            Icon={BalanceIcon}
+          />
+          <OverviewCard
+            label="Total Balance"
+            data={{ value: `$${stats.currentBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, growthRate: 0 }}
             Icon={BalanceIcon}
           />
         </div>

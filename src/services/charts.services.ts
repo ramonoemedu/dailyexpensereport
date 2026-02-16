@@ -23,15 +23,47 @@ export async function getClearPortStats(month?: number, year?: number) {
     let yearlyExpense = 0;
     let totalBalance = 0;
 
-    // Fetch Starting Balance for the selected month/year
+    // Fetch all balance settings to find the closest "anchor" balance
     let startingBalance = 0;
+    let anchorYear = 0;
+    let anchorMonth = 0;
+    let hasAnchor = false;
+
     try {
-      const balanceDoc = await getDoc(doc(db, "settings", `balance_${targetYear}_${targetMonth}`));
-      if (balanceDoc.exists()) {
-        startingBalance = balanceDoc.data().amount || 0;
+      const balanceSnapshot = await getDocs(collection(db, "settings"));
+      const balanceRecords = balanceSnapshot.docs
+        .filter(d => d.id.startsWith("balance_"))
+        .map(d => {
+          const parts = d.id.split("_");
+          return { 
+            year: parseInt(parts[1]), 
+            month: parseInt(parts[2]), 
+            amount: parseFloat(d.data().amount || 0)
+          };
+        })
+        .sort((a, b) => (a.year * 12 + a.month) - (b.year * 12 + b.month));
+
+      const targetTime = targetYear * 12 + targetMonth;
+      const anchor = [...balanceRecords].reverse().find(r => (r.year * 12 + r.month) <= targetTime);
+      
+      if (anchor) {
+        startingBalance = anchor.amount;
+        anchorYear = anchor.year;
+        anchorMonth = anchor.month;
+        hasAnchor = true;
+      } else {
+        // Fallback: Specifically check for Jan 2026 if no anchor found
+        const janRef = doc(db, "settings", "balance_2026_0");
+        const janSnap = await getDoc(janRef);
+        if (janSnap.exists()) {
+          startingBalance = janSnap.data().amount || 0;
+          anchorYear = 2026;
+          anchorMonth = 0;
+          hasAnchor = true;
+        }
       }
     } catch (e) {
-      console.error("Error fetching starting balance:", e);
+      console.error("Error fetching balances:", e);
     }
 
     const categoryTotals: Record<string, number> = {};
@@ -55,6 +87,18 @@ export async function getClearPortStats(month?: number, year?: number) {
 
       const isIncome = data["Type"] === "Income";
       const category = autoCategorize(data["Description"] || "", data["Category"]);
+
+      // Calculate Carryover: If we have an anchor, add transactions from anchor month to before target month
+      if (hasAnchor) {
+        const transTime = date.year() * 12 + date.month();
+        const anchorTime = anchorYear * 12 + anchorMonth;
+        const targetTime = targetYear * 12 + targetMonth;
+
+        if (transTime >= anchorTime && transTime < targetTime) {
+          if (isIncome) startingBalance += amount;
+          else startingBalance -= amount;
+        }
+      }
 
       // Total balance (historical - includes everything that is not future and not inactive)
       if (!isFuture) {
@@ -126,6 +170,12 @@ export async function getClearPortStats(month?: number, year?: number) {
       .sort(([, a], [, b]) => b - a)
       .map(([name, value]) => ({ name, value }));
 
+    // currentBalance should be Starting Balance of anchor + all non-future transactions from anchor onwards
+    // Since we initialized startingBalance with anchor and added all transactions before targetMonth, 
+    // and totalBalance is just sum of ALL non-future transactions, we need to adjust totalBalance.
+    
+    const finalCurrentBalance = hasAnchor ? (startingBalance + monthlyIncome - monthlyAmount) : totalBalance;
+
     return {
       monthlyTransactions,
       monthlyAmount,
@@ -141,7 +191,7 @@ export async function getClearPortStats(month?: number, year?: number) {
       targetMonth,
       targetYear,
       startingBalance,
-      currentBalance: totalBalance,
+      currentBalance: finalCurrentBalance,
       growth: { total: 10, amount: 5 }
     };
   } catch (error) {

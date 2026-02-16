@@ -21,6 +21,7 @@ export function useExpenseData() {
   const [allRows, setAllRows] = useState<Record<string, any>[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [balanceRecords, setBalanceRecords] = useState<{year: number, month: number, amount: number}[]>([]);
   const [filters, setFilters] = useState({
     searchText: "",
     date: null as string | null,
@@ -32,6 +33,7 @@ export function useExpenseData() {
   const fetchAllData = useCallback(async () => {
     setLoading(true);
     try {
+      // Fetch Expenses
       const q = query(
         collection(db, "expenses"),
         orderBy("Date", "desc"),
@@ -49,13 +51,28 @@ export function useExpenseData() {
             mapped[uiKey] = raw[key];
           }
         }
-        // Ensure Type exists
         if (!mapped["Type"]) mapped["Type"] = "Expense";
         return mapped;
       });
       setAllRows(data);
+
+      // Fetch Balances
+      const balanceSnapshot = await getDocs(collection(db, "settings"));
+      const balances = balanceSnapshot.docs
+        .filter(d => d.id.startsWith("balance_"))
+        .map(d => {
+          const parts = d.id.split("_");
+          return { 
+            year: parseInt(parts[1]), 
+            month: parseInt(parts[2]), 
+            amount: parseFloat(d.data().amount || 0)
+          };
+        })
+        .sort((a, b) => (a.year * 12 + a.month) - (b.year * 12 + b.month));
+      setBalanceRecords(balances);
+
     } catch (err) {
-      console.error("Error fetching expense data:", err);
+      console.error("Error fetching data:", err);
     } finally {
       setLoading(false);
     }
@@ -103,9 +120,6 @@ export function useExpenseData() {
     const filterMonth = filters.month;
     const filterYear = filters.year;
     
-    // Reference date based on filter
-    const refDate = dayjs().year(filterYear).month(filterMonth);
-
     const result = {
       weeklyIncome: 0,
       weeklyExpense: 0,
@@ -113,23 +127,49 @@ export function useExpenseData() {
       monthlyExpense: 0,
       totalIncome: 0,
       totalExpense: 0,
+      startingBalance: 0,
+      currentBalance: 0,
     };
+
+    // Find anchor balance
+    const targetTime = filterYear * 12 + filterMonth;
+    const anchor = [...balanceRecords].reverse().find(r => (r.year * 12 + r.month) <= targetTime);
+    
+    let baseBalance = 0;
+    let anchorYear = 0;
+    let anchorMonth = 0;
+    let hasAnchor = false;
+
+    if (anchor) {
+      baseBalance = anchor.amount;
+      anchorYear = anchor.year;
+      anchorMonth = anchor.month;
+      hasAnchor = true;
+    }
 
     allRows.forEach(row => {
       if (row.status === 'inactive') return;
 
       const date = dayjs(row.Date);
-      // Skip future dates for stats
-      if (date.isAfter(dayjs(), 'day')) {
-        console.log(`Skipping future date: ${row.Date} (${row.Description})`);
-        return;
-      }
+      const isFuture = date.isAfter(dayjs(), 'day');
 
       const amount = Math.abs(parseFloat(row["Amount (Income/Expense)"] || row["Amount"] || 0));
       const isIncome = row.Type === 'Income';
 
+      // 1. Calculate Carryover for "startingBalance"
+      if (hasAnchor) {
+        const transTime = date.year() * 12 + date.month();
+        const anchorTime = anchorYear * 12 + anchorMonth;
+        if (transTime >= anchorTime && transTime < targetTime) {
+          if (isIncome) baseBalance += amount;
+          else baseBalance -= amount;
+        }
+      }
+
+      // 2. Regular stats logic
+      if (isFuture) return;
+
       const isTargetMonth = date.month() === filterMonth && date.year() === filterYear;
-      // Week is only relevant if we are looking at the current month/year or a specific reference week
       const isTargetWeek = date.isSame(dayjs(), 'week'); 
 
       if (isIncome) {
@@ -143,8 +183,11 @@ export function useExpenseData() {
       }
     });
 
+    result.startingBalance = baseBalance;
+    result.currentBalance = baseBalance + result.monthlyIncome - result.monthlyExpense;
+
     return result;
-  }, [allRows, filters.month, filters.year]);
+  }, [allRows, filters.month, filters.year, balanceRecords]);
 
   const paginatedRows = useMemo(() => {
     const start = (page - 1) * PAGE_SIZE;

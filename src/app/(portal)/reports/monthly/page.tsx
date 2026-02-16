@@ -152,7 +152,7 @@ export default function MonthlyReportPage() {
                 <TableRow className="bg-primary/5 font-bold italic text-primary">
                   <TableCell className="py-4">01-{month+1 < 10 ? '0'+(month+1) : month+1}-{year}</TableCell>
                   <TableCell colSpan={2}>OPENING BALANCE CARRIED FORWARD</TableCell>
-                  <TableCell className="text-right">-</TableCell>
+                  <TableCell className="text-right">${(stats.startingBalance || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
                   <TableCell className="text-right">-</TableCell>
                   <TableCell className="text-right">${(stats.startingBalance || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
                 </TableRow>
