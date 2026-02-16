@@ -40,52 +40,49 @@ export function UserInfo() {
 
   return (
     <Dropdown isOpen={isOpen} setIsOpen={setIsOpen}>
-      <DropdownTrigger className="rounded align-middle outline-none ring-primary ring-offset-2 focus-visible:ring-1 dark:ring-offset-gray-dark">
+      <DropdownTrigger className="rounded-xl align-middle outline-none transition-all hover:bg-gray-100 dark:hover:bg-dark-2 p-1.5 ring-primary ring-offset-2 focus-visible:ring-1 dark:ring-offset-gray-dark">
         <span className="sr-only">My Account</span>
 
         <figure className="flex items-center gap-3">
-          <div className="flex size-10 items-center justify-center rounded-full bg-gray-2 text-dark-5 dark:bg-dark-2 dark:text-dark-6">
-            <UserIcon className="size-6" />
+          <div className="flex size-9 items-center justify-center rounded-xl bg-primary/10 text-primary shadow-inner">
+            <UserIcon className="size-5" />
           </div>
-          <figcaption className="flex items-center gap-1 font-medium text-dark dark:text-dark-6 max-[1024px]:sr-only">
+          <figcaption className="flex items-center gap-1 font-bold text-sm text-dark dark:text-white max-[1024px]:sr-only">
             <span>{user.name}</span>
 
             <ChevronUpIcon
               aria-hidden
               className={cn(
-                "rotate-180 transition-transform",
-                isOpen && "rotate-0",
+                "size-4 rotate-180 transition-transform duration-300",
+                isOpen && "rotate-0 text-primary",
               )}
-              strokeWidth={1.5}
             />
           </figcaption>
         </figure>
       </DropdownTrigger>
 
       <DropdownContent
-        className="border border-stroke bg-white shadow-md dark:border-dark-3 dark:bg-gray-dark min-[230px]:min-w-[17.5rem]"
+        className="rounded-2xl border border-stroke bg-white/95 backdrop-blur-xl shadow-2xl dark:border-dark-3 dark:bg-gray-dark/95 min-[230px]:min-w-[17.5rem] mt-2 overflow-hidden"
         align="end"
       >
         <h2 className="sr-only">User information</h2>
 
-        <div className="flex flex-col px-5 py-3.5">
-          <div className="text-base font-bold text-dark dark:text-white">
+        <div className="flex flex-col px-6 py-5 bg-gradient-to-br from-primary/5 to-transparent">
+          <div className="text-base font-black text-dark dark:text-white leading-tight">
             {user.name}
           </div>
-          <div className="text-sm font-medium text-dark-5 dark:text-dark-6">
+          <div className="text-xs font-bold text-dark-5 mt-1">
             {user.email}
           </div>
         </div>
 
-        <hr className="border-[#E8E8E8] dark:border-dark-3" />
-
-        <div className="p-2 text-base text-[#4B5563] dark:text-dark-6">
+        <div className="p-2">
           <button
-            className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-[9px] hover:bg-gray-2 hover:text-dark dark:hover:bg-dark-3 dark:hover:text-white transition-colors"
+            className="flex w-full items-center gap-3 rounded-xl px-4 py-3 text-danger hover:bg-danger/5 transition-all font-bold text-sm"
             onClick={handleLogout}
           >
-            <LogOutIcon />
-            <span className="text-base font-bold">Log out</span>
+            <LogOutIcon className="size-5" />
+            <span>Sign Out</span>
           </button>
         </div>
       </DropdownContent>

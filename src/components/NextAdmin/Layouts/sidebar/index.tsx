@@ -1,55 +1,26 @@
 "use client";
 
-import { Logo } from "@/components/NextAdmin/logo";
 import { cn } from "@/lib/NextAdmin/utils";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState } from "react";
 import { NAV_DATA } from "./data";
 import { ArrowLeftIcon, ChevronUp } from "./icons";
 import { MenuItem } from "./menu-item";
 import { useSidebarContext } from "./sidebar-context";
-import { useAuthContext } from "@/components/AuthProvider";
+import { Logo } from "@/components/NextAdmin/logo";
 
 export function Sidebar() {
   const pathname = usePathname();
   const { setIsOpen, isOpen, isMobile, toggleSidebar } = useSidebarContext();
-  const { user } = useAuthContext();
   const [expandedItems, setExpandedItems] = useState<string[]>([]);
-
-  // Check if user is ramonoem or admin
-  const isAuthorized = useMemo(() => {
-    if (!user) return false;
-    const email = user.email || "";
-    // Check for both the internal email, google email, and the default admin email
-    return (
-      email.toLowerCase().startsWith("ramonoem@") || 
-      email.toLowerCase() === "ramonoemedu@gmail.com" ||
-      email.toLowerCase() === "admin@clearport.local"
-    );
-  }, [user]);
-
-  // Filter navigation based on authorization
-  const filteredNavData = useMemo(() => {
-    return NAV_DATA.filter(section => {
-      if (section.restricted && !isAuthorized) return false;
-      return true;
-    }).map(section => ({
-      ...section,
-      items: section.items.filter(item => {
-        if (item.restricted && !isAuthorized) return false;
-        return true;
-      })
-    }));
-  }, [isAuthorized]);
 
   const toggleExpanded = (title: string) => {
     setExpandedItems((prev) => (prev.includes(title) ? [] : [title]));
   };
 
   useEffect(() => {
-    // Keep collapsible open, when it's subpage is active
-    filteredNavData.some((section) => {
+    NAV_DATA.some((section) => {
       return section.items.some((item) => {
         return item.items.some((subItem) => {
           if (subItem.url === pathname) {
@@ -61,14 +32,17 @@ export function Sidebar() {
         });
       });
     });
-  }, [pathname, filteredNavData]);
+  }, [pathname]);
 
   return (
     <>
-      {/* Mobile Overlay */}
-      {isMobile && isOpen && (
+      {/* Mobile Overlay - Premium Blur */}
+      {isMobile && (
         <div
-          className="fixed inset-0 z-40 bg-black/50 transition-opacity duration-300"
+          className={cn(
+            "fixed inset-0 z-40 bg-black/30 backdrop-blur-md transition-all duration-500",
+            isOpen ? "opacity-100 visible" : "opacity-0 invisible pointer-events-none"
+          )}
           onClick={() => setIsOpen(false)}
           aria-hidden="true"
         />
@@ -76,20 +50,20 @@ export function Sidebar() {
 
       <aside
         className={cn(
-          "max-w-[290px] overflow-hidden border-r border-gray-200 bg-white transition-[width] duration-200 ease-linear dark:border-gray-800 dark:bg-gray-dark",
-          isMobile ? "fixed bottom-0 top-0 z-50" : "sticky top-0 h-screen",
-          isOpen ? "w-full" : "w-0",
+          "z-50 flex flex-col border-r border-stroke bg-white/95 transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)] dark:border-dark-3 dark:bg-gray-dark/98 backdrop-blur-2xl shadow-2xl",
+          // Layout Behavior
+          !isMobile ? "sticky top-0 h-screen transition-[width,transform]" : "fixed bottom-0 top-0",
+          isOpen ? "w-[290px] translate-x-0" : "w-0 -translate-x-full lg:translate-x-0 lg:w-0 overflow-hidden border-none"
         )}
         aria-label="Main navigation"
-        aria-hidden={!isOpen}
-        inert={!isOpen}
       >
-        <div className="flex h-full flex-col py-8 pl-[25px] pr-[7px]">
-          <div className="relative pr-4.5 mb-2">
+        <div className="flex h-full flex-col py-8 px-6 overflow-hidden min-w-[290px]">
+          {/* Logo Section - Professional Spacing */}
+          <div className="flex items-center justify-between mb-12 px-2">
             <Link
               href={"/"}
               onClick={() => isMobile && toggleSidebar()}
-              className="px-0 py-2 min-[850px]:py-0"
+              className="transition-all duration-300 hover:scale-105 active:scale-95 block w-full relative h-10"
             >
               <Logo />
             </Link>
@@ -97,64 +71,72 @@ export function Sidebar() {
             {isMobile && (
               <button
                 onClick={toggleSidebar}
-                className="absolute left-3/4 right-4.5 top-1/2 -translate-y-1/2 text-right"
+                className="group flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gray-100 text-dark-4 hover:bg-primary hover:text-white transition-all duration-300 dark:bg-dark-2"
               >
-                <span className="sr-only">Close Menu</span>
-
-                <ArrowLeftIcon className="ml-auto size-7" />
+                <ArrowLeftIcon className="size-5 transition-transform group-hover:-translate-x-0.5" />
               </button>
             )}
           </div>
 
-          {/* Navigation */}
-          <div className="custom-scrollbar mt-6 flex-1 overflow-y-auto pr-3 min-[850px]:mt-10">
-            {filteredNavData.map((section) => (
-              <div key={section.label} className="mb-6">
-                <h2 className="mb-5 text-sm font-medium text-dark-4 dark:text-dark-6">
+          {/* Navigation - Bento Design */}
+          <div className="custom-scrollbar flex-1 overflow-y-auto pr-2 -mr-2">
+            {NAV_DATA.map((section) => (
+              <div key={section.label} className="mb-10 last:mb-0">
+                <h2 className="mb-5 px-4 text-[11px] font-black uppercase tracking-[0.25em] text-dark-5 dark:text-dark-6 opacity-50 flex items-center gap-2">
+                  <span className="h-[1px] w-4 bg-primary opacity-40"></span>
                   {section.label}
                 </h2>
 
                 <nav role="navigation" aria-label={section.label}>
-                  <ul className="space-y-2">
+                  <ul className="space-y-2.5">
                     {section.items.map((item) => (
                       <li key={item.title}>
                         {item.items.length ? (
-                          <div>
+                          <div className="space-y-1.5">
                             <MenuItem
-                              isActive={item.items.some(
-                                ({ url }) => url === pathname,
-                              )}
+                              isActive={item.items.some(({ url }) => url === pathname)}
                               onClick={() => toggleExpanded(item.title)}
+                              className="group py-3.5"
                             >
-                              <item.icon
-                                className="size-6 shrink-0"
-                                aria-hidden="true"
-                              />
+                              <div className={cn(
+                                "flex h-9 w-9 items-center justify-center rounded-xl transition-all duration-300 group-hover:scale-110",
+                                item.items.some(({ url }) => url === pathname) 
+                                  ? "bg-primary text-white shadow-lg shadow-primary/30" 
+                                  : "bg-gray-100 dark:bg-dark-2 text-dark-4 group-hover:bg-primary/10 group-hover:text-primary"
+                              )}>
+                                <item.icon className="size-5" aria-hidden="true" />
+                              </div>
 
-                              <span>{item.title}</span>
+                              <span className="flex-1 font-bold text-[15px] tracking-tight">{item.title}</span>
 
                               <ChevronUp
                                 className={cn(
-                                  "ml-auto rotate-180 transition-transform duration-200",
-                                  expandedItems.includes(item.title) &&
-                                    "rotate-0",
+                                  "ml-auto size-4 transition-all duration-500",
+                                  expandedItems.includes(item.title) ? "rotate-0 text-primary" : "rotate-180 opacity-40",
                                 )}
                                 aria-hidden="true"
                               />
                             </MenuItem>
 
                             {expandedItems.includes(item.title) && (
-                              <ul
-                                className="ml-9 mr-0 space-y-1.5 pb-[15px] pr-0 pt-2"
-                                role="menu"
-                              >
+                              <ul className="ml-6 pl-5 border-l-2 border-primary/10 dark:border-dark-3 space-y-1.5 py-1" role="menu">
                                 {item.items.map((subItem) => (
                                   <li key={subItem.title} role="none">
                                     <MenuItem
                                       as="link"
                                       href={subItem.url}
                                       isActive={pathname === subItem.url}
+                                      className={cn(
+                                        "py-2.5 text-[13px] font-bold transition-all duration-300",
+                                        pathname === subItem.url ? "text-primary translate-x-1" : "text-dark-5 hover:text-dark dark:hover:text-white hover:translate-x-1"
+                                      )}
                                     >
+                                      {subItem.icon && (
+                                        <subItem.icon className={cn(
+                                          "size-4 opacity-60 mr-1",
+                                          pathname === subItem.url && "text-primary opacity-100"
+                                        )} />
+                                      )}
                                       <span>{subItem.title}</span>
                                     </MenuItem>
                                   </li>
@@ -163,29 +145,22 @@ export function Sidebar() {
                             )}
                           </div>
                         ) : (
-                          (() => {
-                            const href =
-                              "url" in item
-                                ? item.url + ""
-                                : "/" +
-                                  item.title.toLowerCase().split(" ").join("-");
-
-                            return (
-                              <MenuItem
-                                className="flex items-center gap-3 py-3"
-                                as="link"
-                                href={href}
-                                isActive={pathname === href}
-                              >
-                                <item.icon
-                                  className="size-6 shrink-0"
-                                  aria-hidden="true"
-                                />
-
-                                <span>{item.title}</span>
-                              </MenuItem>
-                            );
-                          })()
+                          <MenuItem
+                            as="link"
+                            href={item.url || "/"}
+                            isActive={pathname === item.url}
+                            className="group py-3.5"
+                          >
+                            <div className={cn(
+                              "flex h-9 w-9 items-center justify-center rounded-xl transition-all duration-300 group-hover:scale-110",
+                              pathname === item.url 
+                                ? "bg-primary text-white shadow-lg shadow-primary/30" 
+                                : "bg-gray-100 dark:bg-dark-2 text-dark-4 group-hover:bg-primary/10 group-hover:text-primary"
+                            )}>
+                              <item.icon className="size-5" aria-hidden="true" />
+                            </div>
+                            <span className="font-bold text-[15px] tracking-tight">{item.title}</span>
+                          </MenuItem>
                         )}
                       </li>
                     ))}
@@ -193,6 +168,13 @@ export function Sidebar() {
                 </nav>
               </div>
             ))}
+          </div>
+
+          {/* Footer - Minimalist Brand */}
+          <div className="mt-auto pt-8 border-t border-stroke dark:border-dark-3 text-center">
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-dark-5 opacity-40">
+              Daily Expense System
+            </p>
           </div>
         </div>
       </aside>

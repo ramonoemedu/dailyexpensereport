@@ -217,29 +217,34 @@ export default function DailyExpenseRoute() {
 
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
           <OverviewCard
-            label="Starting Balance"
+            label="Initial Carryover"
             data={{ value: `$${stats.startingBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, growthRate: 0 }}
             Icon={BalanceIcon}
+            gradient="blue"
           />
           <OverviewCard
             label={`${months[month]} Income`}
             data={{ value: `$${stats.monthlyIncome.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, growthRate: 0 }}
             Icon={IncomeIcon}
+            gradient="green"
           />
           <OverviewCard
             label={`${months[month]} Expense`}
             data={{ value: `$${stats.monthlyExpense.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, growthRate: 0 }}
             Icon={ExpenseIcon}
+            gradient="red"
           />
           <OverviewCard
             label="Monthly Profit/Loss"
             data={{ value: `${(stats.monthlyIncome - stats.monthlyExpense) >= 0 ? '+' : ''}$${(stats.monthlyIncome - stats.monthlyExpense).toLocaleString(undefined, { minimumFractionDigits: 2 })}`, growthRate: 0 }}
             Icon={BalanceIcon}
+            gradient="purple"
           />
           <OverviewCard
             label="Total Balance"
             data={{ value: `$${stats.currentBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, growthRate: 0 }}
             Icon={BalanceIcon}
+            gradient="dark"
           />
         </div>
 

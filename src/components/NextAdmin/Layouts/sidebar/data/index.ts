@@ -4,6 +4,7 @@ import { SVGProps, ComponentType } from "react";
 export interface NavSubItem {
   title: string;
   url: string;
+  icon?: ComponentType<SVGProps<SVGSVGElement>>;
 }
 
 export interface NavItem {
@@ -43,6 +44,7 @@ export const NAV_DATA: NavSection[] = [
           {
             title: "Monthly Report",
             url: "/reports/monthly",
+            icon: Icons.Table,
           },
         ],
       },
@@ -53,18 +55,22 @@ export const NAV_DATA: NavSection[] = [
           {
             title: "User Management",
             url: "/settings/users",
+            icon: Icons.User,
           },
           {
             title: "Income Types",
             url: "/settings/income-types",
+            icon: Icons.Alphabet,
           },
           {
             title: "Expense Types",
             url: "/settings/expense-types",
+            icon: Icons.Calendar,
           },
           {
             title: "Starting Balance",
             url: "/settings/balance",
+            icon: Icons.HomeIcon,
           },
         ],
       },

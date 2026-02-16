@@ -24,12 +24,12 @@ export function Header() {
   };
 
   return (
-    <header className="sticky top-0 z-30 flex items-center justify-between border-b border-stroke bg-white px-4 py-5 shadow-1 dark:border-stroke-dark dark:bg-gray-dark md:px-5 2xl:px-10">
+    <header className="sticky top-0 z-30 flex items-center justify-between border-b border-stroke bg-white/80 px-4 py-4 backdrop-blur-xl dark:border-stroke-dark dark:bg-gray-dark/80 md:px-5 2xl:px-10">
       <button
         onClick={toggleSidebar}
-        className="rounded-lg border px-1.5 py-1 dark:border-stroke-dark dark:bg-dark-2 lg:hidden"
+        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gray-100 text-dark-4 transition-all hover:bg-primary/10 hover:text-primary dark:bg-dark-2"
       >
-        <MenuIcon />
+        <MenuIcon className="size-5" />
         <span className="sr-only">Toggle Sidebar</span>
       </button>
 

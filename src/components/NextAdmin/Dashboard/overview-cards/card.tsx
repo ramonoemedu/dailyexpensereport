@@ -1,52 +1,78 @@
-import { ArrowDownIcon, ArrowUpIcon } from "@/assets/icons";
 import { cn } from "@/lib/NextAdmin/utils";
-import type { JSX, SVGProps } from "react";
+import type { SVGProps } from "react";
+import { ArrowDownIcon, ArrowUpIcon } from "@/assets/icons";
 
 type PropsType = {
   label: string;
   data: {
     value: number | string;
-    growthRate: number;
+    growthRate?: number;
   };
-  Icon: (props: SVGProps<SVGSVGElement>) => JSX.Element;
+  Icon: React.ComponentType<SVGProps<SVGSVGElement>>;
+  gradient?: "blue" | "green" | "red" | "purple" | "orange" | "dark";
 };
 
-export function OverviewCard({ label, data, Icon }: PropsType) {
-  const isDecreasing = data.growthRate < 0;
+const gradients = {
+  blue: "bg-gradient-to-br from-blue-700 via-blue-600 to-blue-500 text-white border-blue-400/20 hover:shadow-blue-500/40",
+  green: "bg-gradient-to-br from-emerald-700 via-emerald-600 to-teal-500 text-white border-emerald-400/20 hover:shadow-emerald-500/40",
+  red: "bg-gradient-to-br from-rose-700 via-rose-600 to-orange-500 text-white border-rose-400/20 hover:shadow-rose-500/40",
+  purple: "bg-gradient-to-br from-violet-700 via-violet-600 to-purple-500 text-white border-purple-400/20 hover:shadow-violet-500/40",
+  orange: "bg-gradient-to-br from-amber-700 via-amber-600 to-yellow-500 text-white border-amber-400/20 hover:shadow-amber-500/40",
+  dark: "bg-gradient-to-br from-slate-900 via-slate-800 to-slate-700 text-white border-slate-700/30 hover:shadow-slate-950/40",
+};
+
+export function OverviewCard({ label, data, Icon, gradient }: PropsType) {
+  const isDecreasing = (data.growthRate || 0) < 0;
+  const gradientClass = gradient ? gradients[gradient] : "bg-white/80 dark:bg-dark-2/80 border-white/20";
 
   return (
-    <div className="rounded-[10px] bg-white p-6 shadow-1 dark:bg-dark-2">
-      <Icon />
+    <div className={cn(
+      "relative overflow-hidden rounded-[24px] p-7 border transition-all duration-300 ease-out hover:scale-[1.03] hover:z-10",
+      gradientClass,
+      "shadow-[0_8px_32px_0_rgba(31,38,135,0.15)] group"
+    )}>
+      {/* Glossy overlay effect */}
+      <div className="absolute inset-0 bg-gradient-to-tr from-white/10 to-transparent pointer-events-none"></div>
 
-      <div className="mt-6 flex items-end justify-between">
-        <dl>
-          <dt className="mb-1.5 text-heading-6 font-bold text-dark dark:text-white">
+      {/* Top-right minimalist icon */}
+      <div className="absolute top-5 right-5 opacity-20 transform group-hover:scale-110 transition-transform duration-300">
+        <Icon className={cn("size-8", gradient ? "text-white" : "text-primary")} />
+      </div>
+
+      <div className="relative z-10 flex flex-col h-full justify-between">
+        <div>
+          <p className={cn(
+            "text-[10px] font-black uppercase tracking-[0.15em] mb-1",
+            gradient ? "text-white/70" : "text-dark-6"
+          )}>
+            {label}
+          </p>
+          
+          <h3 className={cn(
+            "text-3xl font-black tracking-tight mb-4",
+            gradient ? "text-white" : "text-dark dark:text-white"
+          )}>
             {data.value}
-          </dt>
+          </h3>
+        </div>
 
-          <dd className="text-sm font-medium text-dark-6">{label}</dd>
-        </dl>
-
-        <dl
-          className={cn(
-            "text-sm font-medium",
-            isDecreasing ? "text-red" : "text-green",
-          )}
-        >
-          <dt className="flex items-center gap-1.5">
-            {data.growthRate}%
-            {isDecreasing ? (
-              <ArrowDownIcon aria-hidden />
-            ) : (
-              <ArrowUpIcon aria-hidden />
+        {data.growthRate !== undefined && data.growthRate !== 0 && (
+          <div
+            className={cn(
+              "inline-flex items-center self-start text-[11px] font-black px-2.5 py-1 rounded-full backdrop-blur-sm",
+              gradient ? "bg-white/20 text-white" : (isDecreasing ? "bg-red/10 text-red" : "bg-green/10 text-green"),
             )}
-          </dt>
-
-          <dd className="sr-only">
-            {label} {isDecreasing ? "Decreased" : "Increased"} by{" "}
+          >
             {data.growthRate}%
-          </dd>
-        </dl>
+            <span className="ml-1 flex items-center">
+              {isDecreasing ? (
+                <ArrowDownIcon className="size-2.5" />
+              ) : (
+                <ArrowUpIcon className="size-2.5" />
+              )}
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );

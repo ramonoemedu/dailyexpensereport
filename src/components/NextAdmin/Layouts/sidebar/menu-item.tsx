@@ -1,23 +1,6 @@
 import { cn } from "@/lib/NextAdmin/utils";
-import { cva } from "class-variance-authority";
 import Link from "next/link";
 import { useSidebarContext } from "./sidebar-context";
-
-const menuItemBaseStyles = cva(
-  "rounded-lg px-3.5 font-medium text-dark-4 transition-all duration-200 dark:text-dark-6",
-  {
-    variants: {
-      isActive: {
-        true: "bg-[rgba(87,80,241,0.07)] text-primary hover:bg-[rgba(87,80,241,0.07)] dark:bg-[#FFFFFF1A] dark:text-white",
-        false:
-          "hover:bg-gray-100 hover:text-dark hover:dark:bg-[#FFFFFF1A] hover:dark:text-white",
-      },
-    },
-    defaultVariants: {
-      isActive: false,
-    },
-  },
-);
 
 export function MenuItem(
   props: {
@@ -28,19 +11,20 @@ export function MenuItem(
 ) {
   const { toggleSidebar, isMobile } = useSidebarContext();
 
+  const baseStyles = cn(
+    "flex w-full items-center gap-3.5 px-4 py-3 rounded-[14px] transition-all duration-300 ease-in-out",
+    props.isActive 
+      ? "bg-primary/5 text-primary shadow-sm" 
+      : "text-dark-4 hover:bg-gray-100 dark:text-dark-6 dark:hover:bg-dark-2 hover:text-dark dark:hover:text-white",
+    props.className
+  );
+
   if (props.as === "link") {
     return (
       <Link
         href={props.href}
-        // Close sidebar on clicking link if it's mobile
         onClick={() => isMobile && toggleSidebar()}
-        className={cn(
-          menuItemBaseStyles({
-            isActive: props.isActive,
-            className: "relative block py-2",
-          }),
-          props.className,
-        )}
+        className={baseStyles}
       >
         {props.children}
       </Link>
@@ -51,10 +35,7 @@ export function MenuItem(
     <button
       onClick={props.onClick}
       aria-expanded={props.isActive}
-      className={menuItemBaseStyles({
-        isActive: props.isActive,
-        className: "flex w-full items-center gap-3 py-3",
-      })}
+      className={baseStyles}
     >
       {props.children}
     </button>

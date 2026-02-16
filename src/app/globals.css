@@ -221,6 +221,10 @@ body {
   .modern-card {
     @apply bg-white border border-slate-100 shadow-sm hover:shadow-md transition-shadow duration-300 rounded-2xl;
   }
+
+  .bg-gradient-135 {
+    background-image: linear-gradient(135deg, var(--tw-gradient-stops));
+  }
 }
 
 /* UI Overrides for modern light look */

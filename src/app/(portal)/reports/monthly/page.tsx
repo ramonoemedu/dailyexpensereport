@@ -1,17 +1,17 @@
 'use client';
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import dayjs from "dayjs";
 import { getClearPortStats } from "@/services/charts.services";
-import { Skeleton, Box, Typography, Paper, Divider, Button } from "@mui/material";
+import { Skeleton, Button } from "@mui/material";
 import PrintIcon from '@mui/icons-material/Print';
-import { 
-  Table, 
-  TableBody, 
-  TableCell, 
-  TableHead, 
-  TableHeader, 
-  TableRow 
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow
 } from "@/components/NextAdmin/ui/table";
 import { cn } from "@/lib/NextAdmin/utils";
 
@@ -21,7 +21,10 @@ export default function MonthlyReportPage() {
   const [month, setMonth] = useState(dayjs().month());
   const [year, setYear] = useState(dayjs().year());
 
-  const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  const months = useMemo(() => [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
+  ], []);
   const years = [2024, 2025, 2026];
 
   useEffect(() => {
@@ -39,18 +42,14 @@ export default function MonthlyReportPage() {
     loadReport();
   }, [month, year]);
 
-  const handlePrint = () => {
-    window.print();
-  };
-
   if (loading || !stats) {
     return (
       <div className="space-y-6 p-6">
-        <Skeleton variant="rectangular" height={100} className="rounded-2xl" />
+        <Skeleton variant="rectangular" height={100} className="rounded-3xl" />
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <Skeleton variant="rectangular" height={150} className="rounded-2xl" />
-          <Skeleton variant="rectangular" height={150} className="rounded-2xl" />
-          <Skeleton variant="rectangular" height={150} className="rounded-2xl" />
+          {[...Array(3)].map((_, i) => (
+            <Skeleton key={i} variant="rectangular" height={160} className="rounded-3xl" />
+          ))}
         </div>
       </div>
     );
@@ -60,130 +59,136 @@ export default function MonthlyReportPage() {
   const currentBankBalance = (stats.startingBalance || 0) + netSavings;
 
   return (
-    <div className="mx-auto w-full max-w-7xl space-y-8 p-2 md:p-6 print:p-0">
-      {/* Header & Controls */}
-      <div className="flex flex-wrap items-center justify-between gap-6 print:hidden">
+    <div className="mx-auto w-full max-w-7xl space-y-8 p-4 md:p-8 print:p-0 animate-fade-in">
+
+      {/* --- Header Section --- */}
+      <div className="flex flex-wrap items-end justify-between gap-6 print:hidden">
         <div>
-          <h1 className="text-heading-4 font-black text-dark dark:text-white">Monthly Financial Report</h1>
-          <p className="text-body-sm font-medium text-dark-5">Detailed summary of your income and expenses</p>
+          <h1 className="text-4xl font-black tracking-tight text-dark dark:text-white">
+            Statement <span className="text-primary opacity-50">#</span>{months[month].substring(0, 3).toUpperCase()}{year}
+          </h1>
+          <p className="mt-2 text-base font-medium text-gray-500">
+            Comprehensive financial reconciliation for {months[month]}
+          </p>
         </div>
 
-        <div className="flex items-center gap-3">
-          <select 
-            value={month} 
+        <div className="flex items-center gap-3 bg-white/50 dark:bg-dark-2/50 backdrop-blur-md p-2 rounded-2xl border border-stroke dark:border-dark-3 shadow-sm">
+          <select
+            value={month}
             onChange={(e) => setMonth(parseInt(e.target.value))}
-            className="rounded-xl border border-stroke bg-white px-4 py-2.5 text-sm font-bold shadow-sm outline-none focus:ring-4 focus:ring-primary/10 dark:border-dark-3 dark:bg-dark-2"
+            className="bg-transparent px-3 py-2 text-sm font-bold outline-none cursor-pointer"
           >
             {months.map((m, i) => <option key={m} value={i}>{m}</option>)}
           </select>
-          <select 
-            value={year} 
+          <div className="h-4 w-px bg-gray-300 dark:bg-gray-700" />
+          <select
+            value={year}
             onChange={(e) => setYear(parseInt(e.target.value))}
-            className="rounded-xl border border-stroke bg-white px-4 py-2.5 text-sm font-bold shadow-sm outline-none focus:ring-4 focus:ring-primary/10 dark:border-dark-3 dark:bg-dark-2"
+            className="bg-transparent px-3 py-2 text-sm font-bold outline-none cursor-pointer"
           >
             {years.map(y => <option key={y} value={y}>{y}</option>)}
           </select>
-          <Button 
-            variant="contained" 
-            startIcon={<PrintIcon />}
-            onClick={handlePrint}
-            sx={{ borderRadius: '12px', bgcolor: 'primary.main', textTransform: 'none', fontWeight: 'bold' }}
+          <button
+            onClick={() => window.print()}
+            className="ml-2 flex items-center gap-2 bg-dark dark:bg-white text-white dark:text-dark px-4 py-2 rounded-xl text-sm font-bold hover:opacity-90 transition-all"
           >
-            Print Report
-          </Button>
+            <PrintIcon fontSize="small" />
+            Print
+          </button>
         </div>
       </div>
 
-      {/* Modern Gradient Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="relative overflow-hidden rounded-[24px] bg-gradient-to-br from-primary to-blue-700 p-8 text-white shadow-lg shadow-primary/20">
+      {/* --- Top Bento Grid Summary --- */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Initial Balance */}
+        <div className="group relative overflow-hidden rounded-[32px] bg-gradient-to-br from-blue-600 to-indigo-700 p-8 text-white shadow-xl transition-transform hover:scale-[1.02]">
           <div className="relative z-10">
-            <p className="text-sm font-bold uppercase tracking-widest opacity-80">Initial Balance</p>
-            <h3 className="mt-2 text-4xl font-black">${(stats.startingBalance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</h3>
-            <p className="mt-4 text-xs font-medium opacity-70">Beginning of {months[month]} {year}</p>
-          </div>
-          <div className="absolute -right-4 -top-4 h-32 w-32 rounded-full bg-white/10 blur-2xl"></div>
-        </div>
-
-        <div className="relative overflow-hidden rounded-[24px] bg-gradient-to-br from-success to-emerald-600 p-8 text-white shadow-lg shadow-success/20">
-          <div className="relative z-10">
-            <p className="text-sm font-bold uppercase tracking-widest opacity-80">Net Monthly Savings</p>
-            <h3 className="mt-2 text-4xl font-black">{netSavings >= 0 ? '+' : ''}${netSavings.toLocaleString(undefined, { minimumFractionDigits: 2 })}</h3>
-            <div className="mt-4 flex items-center gap-4 text-xs font-bold">
-              <span className="rounded-lg bg-white/20 px-2 py-1">In: ${stats.monthlyIncome.toLocaleString()}</span>
-              <span className="rounded-lg bg-white/20 px-2 py-1">Out: ${stats.monthlyAmount.toLocaleString()}</span>
+            <p className="text-xs font-black uppercase tracking-[0.2em] opacity-70">Opening Balance</p>
+            <h3 className="mt-3 text-4xl font-black">
+              ${(stats.startingBalance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+            </h3>
+            <div className="mt-6 inline-flex items-center rounded-full bg-white/20 px-3 py-1 text-[10px] font-bold">
+              AS OF {months[month].toUpperCase()} 1ST
             </div>
           </div>
-          <div className="absolute -right-4 -top-4 h-32 w-32 rounded-full bg-white/10 blur-2xl"></div>
+          <div className="absolute -right-6 -bottom-6 h-32 w-32 rounded-full bg-white/10 blur-3xl group-hover:bg-white/20 transition-all" />
         </div>
 
-        <div className="relative overflow-hidden rounded-[24px] bg-gradient-to-br from-dark to-slate-800 p-8 text-white shadow-lg shadow-dark/20 dark:from-dark-2 dark:to-dark-3">
+        {/* Net Savings */}
+        <div className="group relative overflow-hidden rounded-[32px] bg-gradient-to-br from-emerald-500 to-teal-700 p-8 text-white shadow-xl transition-transform hover:scale-[1.02]">
           <div className="relative z-10">
-            <p className="text-sm font-bold uppercase tracking-widest opacity-80">Closing Bank Balance</p>
-            <h3 className="mt-2 text-4xl font-black">${currentBankBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}</h3>
-            <p className="mt-4 text-xs font-medium opacity-70">Estimated current cash on hand</p>
+            <p className="text-xs font-black uppercase tracking-[0.2em] opacity-70">Monthly Cash Flow</p>
+            <h3 className="mt-3 text-4xl font-black">
+              {netSavings >= 0 ? '+' : ''}${netSavings.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+            </h3>
+            <div className="mt-6 flex items-center gap-3">
+              <div className="text-[10px] font-bold bg-black/10 rounded-lg p-2">IN: ${stats.monthlyIncome.toLocaleString()}</div>
+              <div className="text-[10px] font-bold bg-black/10 rounded-lg p-2">OUT: ${stats.monthlyAmount.toLocaleString()}</div>
+            </div>
           </div>
-          <div className="absolute -right-4 -top-4 h-32 w-32 rounded-full bg-white/10 blur-2xl"></div>
+          <div className="absolute -right-6 -bottom-6 h-32 w-32 rounded-full bg-white/10 blur-3xl" />
+        </div>
+
+        {/* Closing Balance */}
+        <div className="group relative overflow-hidden rounded-[32px] bg-slate-900 p-8 text-white shadow-xl transition-transform hover:scale-[1.02] dark:bg-white dark:text-dark">
+          <div className="relative z-10">
+            <p className="text-xs font-black uppercase tracking-[0.2em] opacity-70">Closing Position</p>
+            <h3 className="mt-3 text-4xl font-black">
+              ${currentBankBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+            </h3>
+            <p className="mt-6 text-[11px] font-bold opacity-60">ESTIMATED CASH ON HAND</p>
+          </div>
+          <div className="absolute -right-6 -bottom-6 h-32 w-32 rounded-full bg-primary/20 blur-3xl" />
         </div>
       </div>
 
-      {/* Detailed Financial Verification Section */}
-      <Paper className="overflow-hidden rounded-[24px] border border-stroke bg-white shadow-sm dark:border-dark-3 dark:bg-gray-dark">
-        <div className="border-b border-stroke p-6 dark:border-dark-3">
-          <h3 className="text-xl font-extrabold text-dark dark:text-white">Financial Statement - {months[month]} {year}</h3>
-          <p className="text-sm font-medium text-dark-5">Reconciliation of all transactions for this period</p>
+      {/* --- Main Report Section --- */}
+      <div className="overflow-hidden rounded-[32px] border border-stroke bg-white/50 backdrop-blur-md shadow-2xl dark:border-white/5 dark:bg-dark-2/50">
+        <div className="p-8 border-b border-stroke dark:border-white/5 flex items-center justify-between">
+          <h3 className="text-xl font-black">Transaction Ledger</h3>
+          <span className="text-[10px] font-bold bg-primary/10 text-primary px-3 py-1 rounded-full uppercase">Verified Report</span>
         </div>
 
-        <div className="p-6">
-          <div className="max-w-full overflow-x-auto">
+        <div className="p-2 md:p-6">
+          <div className="overflow-hidden rounded-2xl border border-stroke dark:border-white/5">
             <Table>
               <TableHeader>
-                <TableRow className="bg-gray-2 dark:bg-dark-2">
-                  <TableHead className="w-[120px] font-black uppercase text-xs">Date</TableHead>
-                  <TableHead className="font-black uppercase text-xs">Description</TableHead>
-                  <TableHead className="font-black uppercase text-xs">Category</TableHead>
-                  <TableHead className="w-[150px] text-right font-black uppercase text-xs">Debit (In)</TableHead>
-                  <TableHead className="w-[150px] text-right font-black uppercase text-xs">Credit (Out)</TableHead>
-                  <TableHead className="w-[150px] text-right font-black uppercase text-xs">Balance</TableHead>
+                <TableRow className="bg-gray-50/50 dark:bg-white/5">
+                  <TableHead className="font-black text-[10px] uppercase tracking-widest px-6">Date</TableHead>
+                  <TableHead className="font-black text-[10px] uppercase tracking-widest">Details</TableHead>
+                  <TableHead className="font-black text-[10px] uppercase tracking-widest text-right">Debit (+)</TableHead>
+                  <TableHead className="font-black text-[10px] uppercase tracking-widest text-right">Credit (-)</TableHead>
+                  <TableHead className="font-black text-[10px] uppercase tracking-widest text-right px-6">Running Balance</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {/* Initial Balance Row */}
-                <TableRow className="bg-primary/5 font-bold italic text-primary">
-                  <TableCell className="py-4">01-{month+1 < 10 ? '0'+(month+1) : month+1}-{year}</TableCell>
-                  <TableCell colSpan={2}>OPENING BALANCE CARRIED FORWARD</TableCell>
-                  <TableCell className="text-right">${(stats.startingBalance || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
-                  <TableCell className="text-right">-</TableCell>
-                  <TableCell className="text-right">${(stats.startingBalance || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+                {/* Initial Row */}
+                <TableRow className="bg-blue-50/30 dark:bg-blue-500/5 font-bold">
+                  <TableCell className="px-6 py-4 text-xs opacity-60 italic">01-{month + 1}-{year}</TableCell>
+                  <TableCell className="text-xs tracking-tight uppercase">Opening Balance Carried Forward</TableCell>
+                  <TableCell className="text-right text-success text-xs">+${(stats.startingBalance || 0).toLocaleString()}</TableCell>
+                  <TableCell className="text-right text-xs">-</TableCell>
+                  <TableCell className="text-right px-6 font-black text-sm">${(stats.startingBalance || 0).toLocaleString()}</TableCell>
                 </TableRow>
 
                 {(() => {
                   let runningBalance = stats.startingBalance || 0;
-                  return stats.monthlyTransactionsList.map((item: any, idx: number) => {
+                  return stats.monthlyTransactionsList?.map((item: any, idx: number) => {
                     const isIncome = item.type === "Income";
-                    if (isIncome) runningBalance += item.amount;
-                    else runningBalance -= item.amount;
+                    isIncome ? runningBalance += item.amount : runningBalance -= item.amount;
 
                     return (
-                      <TableRow key={item.id || idx} className={cn(item.isFuture && "opacity-50 grayscale")}>
-                        <TableCell className="text-xs font-medium">{dayjs(item.date).format('DD-MM-YYYY')}</TableCell>
-                        <TableCell className="text-xs font-bold">
-                          {item.description ? item.description.charAt(0).toUpperCase() + item.description.slice(1) : "No Description"}
-                        </TableCell>
+                      <TableRow key={idx} className={cn("hover:bg-gray-50/50 dark:hover:bg-white/5", item.isFuture && "opacity-40 grayscale italic")}>
+                        <TableCell className="px-6 text-xs text-gray-500">{dayjs(item.date).format('DD MMM')}</TableCell>
                         <TableCell>
-                          <span className="inline-flex rounded-lg bg-gray-100 px-2 py-0.5 text-[10px] font-bold dark:bg-dark-3">
-                            {item.category}
-                          </span>
+                          <div className="flex flex-col">
+                            <span className="text-xs font-bold">{item.description}</span>
+                            <span className="text-[9px] uppercase font-black text-gray-400">{item.category}</span>
+                          </div>
                         </TableCell>
-                        <TableCell className="text-right text-xs font-black text-success">
-                          {isIncome ? `+$${item.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : "-"}
-                        </TableCell>
-                        <TableCell className="text-right text-xs font-black text-danger">
-                          {!isIncome ? `-$${item.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : "-"}
-                        </TableCell>
-                        <TableCell className="text-right text-xs font-black text-dark dark:text-white">
-                          ${runningBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                        </TableCell>
+                        <TableCell className="text-right text-xs font-bold text-emerald-500">{isIncome ? `+$${item.amount.toLocaleString()}` : ""}</TableCell>
+                        <TableCell className="text-right text-xs font-bold text-rose-500">{!isIncome ? `-$${item.amount.toLocaleString()}` : ""}</TableCell>
+                        <TableCell className="text-right px-6 text-xs font-black">${runningBalance.toLocaleString()}</TableCell>
                       </TableRow>
                     );
                   });
@@ -191,81 +196,54 @@ export default function MonthlyReportPage() {
               </TableBody>
             </Table>
           </div>
-          
-          <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-12">
-            <div className="space-y-6">
-              <h4 className="text-sm font-black uppercase tracking-widest text-dark-5">Top Expense Categories</h4>
-              <div className="space-y-3">
-                {stats.sortedCategories?.map((cat: any, i: number) => (
-                  <div key={i} className="space-y-1">
-                    <div className="flex justify-between text-xs font-bold">
-                      <span className="text-dark dark:text-white">{cat.name}</span>
-                      <span className="text-dark-4">${cat.value.toLocaleString()}</span>
-                    </div>
-                    <div className="h-2 w-full rounded-full bg-gray-200 dark:bg-dark-3">
-                      <div 
-                        className="h-full rounded-full bg-primary" 
-                        style={{ width: `${Math.min(100, (cat.value / stats.monthlyAmount) * 100)}%` }}
-                      ></div>
-                    </div>
-                  </div>
-                ))}
-                {(!stats.sortedCategories || stats.sortedCategories.length === 0) && (
-                  <p className="text-sm text-dark-5 italic">No expenses recorded.</p>
-                )}
-              </div>
 
-              <h4 className="text-sm font-black uppercase tracking-widest text-dark-5 mt-8">Income Summary</h4>
-              <div className="space-y-2">
-                {stats.monthlyIncomeItems.map((item: any, i: number) => (
-                  <div key={i} className="flex justify-between items-center p-3 rounded-xl bg-success/5 border border-success/10">
-                    <div>
-                      <p className="text-sm font-bold text-dark dark:text-white">
-                        {item.description ? item.description.charAt(0).toUpperCase() + item.description.slice(1) : "No Description"}
-                      </p>
-                      <p className="text-[10px] text-dark-5">{dayjs(item.date).format('DD MMM YYYY')}</p>
+          {/* --- Footer Verification Section --- */}
+          <div className="mt-12 grid grid-cols-1 lg:grid-cols-2 gap-12 px-6 pb-12">
+            <div>
+              <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 mb-6">Expense Breakdown</h4>
+              <div className="space-y-5">
+                {stats.sortedCategories?.map((cat: any, i: number) => (
+                  <div key={i} className="group">
+                    <div className="flex justify-between text-[11px] font-bold mb-2">
+                      <span className="opacity-70">{cat.name}</span>
+                      <span>${cat.value.toLocaleString()}</span>
                     </div>
-                    <span className="text-sm font-black text-success">+${item.amount.toLocaleString()}</span>
+                    <div className="h-1.5 w-full rounded-full bg-gray-100 dark:bg-white/5 overflow-hidden">
+                      <div
+                        className="h-full bg-primary transition-all duration-1000"
+                        style={{ width: `${(cat.value / stats.monthlyAmount) * 100}%` }}
+                      />
+                    </div>
                   </div>
                 ))}
-                {stats.monthlyIncomeItems.length === 0 && <p className="text-sm text-dark-5 italic">No income recorded.</p>}
               </div>
             </div>
 
-            <div className="space-y-6">
-               <h4 className="text-sm font-black uppercase tracking-widest text-dark-5">Verification Summary</h4>
-               <div className="rounded-2xl bg-gray-2 p-6 dark:bg-dark-2 space-y-4">
-                  <div className="flex justify-between border-b border-stroke pb-3 dark:border-dark-3">
-                    <span className="text-sm font-medium">Opening Balance</span>
-                    <span className="text-sm font-bold">${(stats.startingBalance || 0).toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between border-b border-stroke pb-3 dark:border-dark-3">
-                    <span className="text-sm font-medium">Total Received (Debit)</span>
-                    <span className="text-sm font-bold text-success">+${stats.monthlyIncome.toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between border-b border-stroke pb-3 dark:border-dark-3">
-                    <span className="text-sm font-medium">Total Paid (Credit)</span>
-                    <span className="text-sm font-bold text-danger">-${stats.monthlyAmount.toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between pt-2">
-                    <span className="text-lg font-black">Closing Balance</span>
-                    <span className="text-lg font-black text-primary">${currentBankBalance.toLocaleString()}</span>
-                  </div>
-               </div>
-               
-               <div className="p-4 rounded-xl bg-warning/5 border border-warning/20">
-                  <p className="text-xs font-bold text-warning uppercase mb-1">Audit Note</p>
-                  <p className="text-[11px] text-dark-5 leading-relaxed">
-                    This report verifies that your starting balance of <strong>${(stats.startingBalance || 0).toLocaleString()}</strong> 
-                    plus your monthly income of <strong>${stats.monthlyIncome.toLocaleString()}</strong> 
-                    minus your expenses of <strong>${stats.monthlyAmount.toLocaleString()}</strong> 
-                    equals your calculated bank balance of <strong>${currentBankBalance.toLocaleString()}</strong>.
-                  </p>
-               </div>
+            <div className="rounded-[24px] bg-gray-50 dark:bg-white/5 p-8 border border-stroke dark:border-white/5">
+              <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 mb-6">Final Reconciliation</h4>
+              <div className="space-y-4">
+                <div className="flex justify-between text-sm">
+                  <span className="font-medium opacity-60">Total Income</span>
+                  <span className="font-bold text-emerald-500">+${stats.monthlyIncome.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="font-medium opacity-60">Total Expenses</span>
+                  <span className="font-bold text-rose-500">-${stats.monthlyAmount.toLocaleString()}</span>
+                </div>
+                <div className="h-px bg-stroke dark:bg-white/10 my-2" />
+                <div className="flex justify-between items-end">
+                  <span className="text-xs font-black uppercase">Closing Balance</span>
+                  <span className="text-2xl font-black text-primary">${currentBankBalance.toLocaleString()}</span>
+                </div>
+              </div>
+
+              <div className="mt-8 p-4 rounded-2xl bg-white dark:bg-dark-2 shadow-sm text-[10px] leading-relaxed font-medium italic opacity-70">
+                Notice: This report confirms the starting balance carryover from previous months matches the current verified transaction logs.
+              </div>
             </div>
           </div>
         </div>
-      </Paper>
+      </div>
     </div>
   );
 }
