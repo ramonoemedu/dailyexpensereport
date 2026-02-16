@@ -65,7 +65,7 @@ export function useExpenseData() {
     return allRows.filter((row) => {
       if (filters.searchText) {
         const search = filters.searchText.toLowerCase();
-        const searchFields = ["Description", "Payment Method"];
+        const searchFields = ["Description", "Payment Method", "Category"];
         const matchesSearch = searchFields.some((field) => {
           const val = row[field];
           return val && val.toString().toLowerCase().includes(search);

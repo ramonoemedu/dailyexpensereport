@@ -1,57 +1,85 @@
 import { db } from "@/lib/firebase";
-import { collection, getDocs, query, orderBy } from "firebase/firestore";
+import { collection, getDocs, query, orderBy, doc, getDoc } from "firebase/firestore";
 import { sanitizeKey } from "@/utils/KeySanitizer";
-
-function autoCategorize(description: string, existingCategory: string): string {
-  if (existingCategory && existingCategory !== "Uncategorized") return existingCategory;
-  
-  const desc = description.toLowerCase();
-  if (desc.includes("café") || desc.includes("lunch") || desc.includes("dinner") || desc.includes("food") || desc.includes("restaurant") || desc.includes("drink") || desc.includes("matcha")) return "Food & Dining";
-  if (desc.includes("gasoline") || desc.includes("taxi") || desc.includes("grab") || desc.includes("car") || desc.includes("hometown")) return "Transportation";
-  if (desc.includes("electricity") || desc.includes("water") || desc.includes("internet") || desc.includes("phone") || desc.includes("top up")) return "Utilities";
-  if (desc.includes("salary") || desc.includes("income") || desc.includes("bonus")) return "Salary/Income";
-  if (desc.includes("nail") || desc.includes("cream") || desc.includes("skincare") || desc.includes("body") || desc.includes("hair")) return "Personal Care";
-  if (desc.includes("loan") || desc.includes("aeon") || desc.includes("interest")) return "Loans & Debt";
-  if (desc.includes("mak") || desc.includes("pa") || desc.includes("pha") || desc.includes("hea") || desc.includes("send to")) return "Family Support";
-  
-  return "General/Other";
-}
+import dayjs from "dayjs";
+import { autoCategorize } from "@/utils/DescriptionHelper";
 
 export async function getClearPortStats(month?: number, year?: number) {
   try {
     const snapshot = await getDocs(collection(db, "expenses"));
-    const now = new Date();
-    now.setHours(23, 59, 59, 999);
-    const targetMonth = month !== undefined ? month : now.getMonth();
-    const targetYear = year !== undefined ? year : now.getFullYear();
+    const now = dayjs();
+    const targetMonth = month !== undefined ? month : now.month();
+    const targetYear = year !== undefined ? year : now.year();
     
     let monthlyTransactions = 0;
     let monthlyAmount = 0;
     let monthlyIncome = 0;
     let monthlyIncomeWithFuture = 0;
     let monthlyIncomeItems: any[] = [];
+    let monthlyTransactionsList: any[] = [];
     let maxExpense = 0;
     
     let yearlyIncome = 0;
     let yearlyExpense = 0;
+    let totalBalance = 0;
+
+    // Fetch Starting Balance for the selected month/year
+    let startingBalance = 0;
+    try {
+      const balanceDoc = await getDoc(doc(db, "settings", `balance_${targetYear}_${targetMonth}`));
+      if (balanceDoc.exists()) {
+        startingBalance = balanceDoc.data().amount || 0;
+      }
+    } catch (e) {
+      console.error("Error fetching starting balance:", e);
+    }
 
     const categoryTotals: Record<string, number> = {};
 
     snapshot.docs.forEach(doc => {
       const data = doc.data();
-      const date = new Date(data[sanitizeKey("Date")] || data["Date"]);
-      const isFuture = date > now;
+      if (data.status === 'inactive') return; // Skip inactive records
 
-      const amount = Math.abs(parseFloat(data[sanitizeKey("Amount")] || data["Amount"] || "0"));
+      const dateStr = data[sanitizeKey("Date")] || data["Date"];
+      if (!dateStr) return;
+
+      const date = dayjs(dateStr);
+      const isFuture = date.isAfter(now, 'day');
+
+      let rawAmount = data[sanitizeKey("Amount")] || data["Amount"] || "0";
+      if (typeof rawAmount === "string") {
+        rawAmount = rawAmount.replace(/,/g, ".");
+      }
+      const amount = Math.abs(parseFloat(rawAmount));
+      if (isNaN(amount) || amount === 0) return; // Skip invalid or zero amount records
+
       const isIncome = data["Type"] === "Income";
       const category = autoCategorize(data["Description"] || "", data["Category"]);
 
-      // Calculate Monthly Income with Future (Always include)
-      if (date.getMonth() === targetMonth && date.getFullYear() === targetYear) {
+      // Total balance (historical - includes everything that is not future and not inactive)
+      if (!isFuture) {
+        if (isIncome) totalBalance += amount;
+        else totalBalance -= amount;
+      }
+
+      // Monthly logic
+      if (date.month() === targetMonth && date.year() === targetYear) {
+        // Add to full transaction list for reports
+        monthlyTransactionsList.push({
+          id: doc.id,
+          date: dateStr,
+          description: data["Description"] || "No Description",
+          category: category,
+          amount: amount,
+          type: data["Type"],
+          paymentMethod: data["Payment Method"],
+          isFuture
+        });
+
         if (isIncome) {
           monthlyIncomeWithFuture += amount;
           monthlyIncomeItems.push({
-            date: data[sanitizeKey("Date")] || data["Date"],
+            date: dateStr,
             description: data["Description"] || "No Description",
             amount,
             isFuture
@@ -62,17 +90,17 @@ export async function getClearPortStats(month?: number, year?: number) {
         }
       }
 
-      // Skip future dates for standard stats
+      // Standard stats logic (skip future)
       if (isFuture) return;
 
       // Yearly totals
-      if (date.getFullYear() === targetYear) {
+      if (date.year() === targetYear) {
         if (isIncome) yearlyIncome += amount;
         else yearlyExpense += amount;
       }
 
       // Monthly totals
-      if (date.getMonth() === targetMonth && date.getFullYear() === targetYear) {
+      if (date.month() === targetMonth && date.year() === targetYear) {
         if (!isIncome) {
           monthlyTransactions++;
           monthlyAmount += amount;
@@ -83,11 +111,20 @@ export async function getClearPortStats(month?: number, year?: number) {
       }
     });
 
+    // Add starting balance to total balance calculation if needed
+    // Actually, Total Balance should probably be Starting Balance + all transactions since that starting point
+    // But for now, let's treat Total Balance as a running sum of everything in DB.
+    
     // Sort income items by date
     monthlyIncomeItems.sort((a, b) => a.date.localeCompare(b.date));
+    monthlyTransactionsList.sort((a, b) => a.date.localeCompare(b.date));
 
     const topCategory = Object.entries(categoryTotals)
       .sort(([, a], [, b]) => b - a)[0]?.[0] || "None";
+
+    const sortedCategories = Object.entries(categoryTotals)
+      .sort(([, a], [, b]) => b - a)
+      .map(([name, value]) => ({ name, value }));
 
     return {
       monthlyTransactions,
@@ -95,12 +132,16 @@ export async function getClearPortStats(month?: number, year?: number) {
       monthlyIncome,
       monthlyIncomeWithFuture,
       monthlyIncomeItems,
+      monthlyTransactionsList,
       maxExpense,
       yearlyIncome,
       yearlyExpense,
       topCategory,
+      sortedCategories,
       targetMonth,
       targetYear,
+      startingBalance,
+      currentBalance: totalBalance,
       growth: { total: 10, amount: 5 }
     };
   } catch (error) {
@@ -109,6 +150,7 @@ export async function getClearPortStats(month?: number, year?: number) {
       monthlyTransactions: 0, monthlyAmount: 0, monthlyIncome: 0, monthlyIncomeWithFuture: 0,
       maxExpense: 0, yearlyIncome: 0, yearlyExpense: 0,
       topCategory: "None", targetMonth: 0, targetYear: 2026,
+      startingBalance: 0, currentBalance: 0,
       growth: { total: 0, amount: 0 }
     };
   }
@@ -117,26 +159,33 @@ export async function getClearPortStats(month?: number, year?: number) {
 export async function getClearanceTimelineData(year?: number) {
   try {
     const snapshot = await getDocs(collection(db, "expenses"));
-    const targetYear = year || new Date().getFullYear();
+    const targetYear = year || dayjs().year();
     const incomeMonthly: Record<string, number> = {};
     const expenseMonthly: Record<string, number> = {};
     
     const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     months.forEach(m => { incomeMonthly[m] = 0; expenseMonthly[m] = 0; });
 
-    const now = new Date();
-    now.setHours(23, 59, 59, 999);
+    const now = dayjs();
     snapshot.docs.forEach(doc => {
       const data = doc.data();
+      if (data.status === 'inactive') return;
+
       const dateStr = data[sanitizeKey("Date")] || data["Date"];
       if (dateStr) {
-        const date = new Date(dateStr);
+        const date = dayjs(dateStr);
         // Skip future dates for stats
-        if (date > now) return;
+        if (date.isAfter(now, 'day')) return;
 
-        if (date.getFullYear() === targetYear) {
-          const month = months[date.getMonth()];
-          const amount = Math.abs(parseFloat(data[sanitizeKey("Amount")] || data["Amount"] || "0"));
+        if (date.year() === targetYear) {
+          const month = months[date.month()];
+          let rawAmount = data[sanitizeKey("Amount")] || data["Amount"] || "0";
+          if (typeof rawAmount === "string") {
+            rawAmount = rawAmount.replace(/,/g, ".");
+          }
+          const amount = Math.abs(parseFloat(rawAmount));
+          if (isNaN(amount) || amount === 0) return;
+
           if (data["Type"] === "Income") incomeMonthly[month] += amount;
           else expenseMonthly[month] += amount;
         }
@@ -156,22 +205,31 @@ export async function getClearanceTimelineData(year?: number) {
 export async function getWeeksProfitData(month?: number, year?: number) {
   try {
     const snapshot = await getDocs(collection(db, "expenses"));
-    const now = new Date();
-    now.setHours(23, 59, 59, 999);
-    const targetMonth = month !== undefined ? month : now.getMonth();
-    const targetYear = year !== undefined ? year : now.getFullYear();
+    const now = dayjs();
+    const targetMonth = month !== undefined ? month : now.month();
+    const targetYear = year !== undefined ? year : now.year();
     const categoryTotals: Record<string, number> = {};
 
     snapshot.docs.forEach(doc => {
       const data = doc.data();
-      const date = new Date(data[sanitizeKey("Date")] || data["Date"]);
-      // Skip future dates for stats
-      if (date > now) return;
+      if (data.status === 'inactive') return;
 
-      if (date.getMonth() === targetMonth && date.getFullYear() === targetYear) {
+      const dateStr = data[sanitizeKey("Date")] || data["Date"];
+      if (!dateStr) return;
+
+      const date = dayjs(dateStr);
+      // Skip future dates for stats
+      if (date.isAfter(now, 'day')) return;
+
+      if (date.month() === targetMonth && date.year() === targetYear) {
         if (data["Type"] !== "Income") {
           const category = autoCategorize(data["Description"] || "", data["Category"]);
-          const amount = Math.abs(parseFloat(data[sanitizeKey("Amount")] || data["Amount"] || "0"));
+          let rawAmount = data[sanitizeKey("Amount")] || data["Amount"] || "0";
+          if (typeof rawAmount === "string") {
+            rawAmount = rawAmount.replace(/,/g, ".");
+          }
+          const amount = Math.abs(parseFloat(rawAmount));
+          if (isNaN(amount) || amount === 0) return;
           categoryTotals[category] = (categoryTotals[category] || 0) + amount;
         }
       }
@@ -179,7 +237,7 @@ export async function getWeeksProfitData(month?: number, year?: number) {
 
     const topCategories = Object.entries(categoryTotals)
       .sort(([, a], [, b]) => b - a)
-      .slice(0, 5);
+      .slice(0, 10);
 
     return {
       sales: topCategories.map(([name, value]) => ({ x: name, y: parseFloat(value.toFixed(2)) })),

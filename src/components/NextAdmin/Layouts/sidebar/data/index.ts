@@ -37,6 +37,16 @@ export const NAV_DATA: NavSection[] = [
         items: [],
       },
       {
+        title: "Reports",
+        icon: Icons.PieChart,
+        items: [
+          {
+            title: "Monthly Report",
+            url: "/reports/monthly",
+          },
+        ],
+      },
+      {
         title: "Settings",
         icon: Icons.FourCircle,
         items: [
@@ -51,6 +61,10 @@ export const NAV_DATA: NavSection[] = [
           {
             title: "Expense Types",
             url: "/settings/expense-types",
+          },
+          {
+            title: "Starting Balance",
+            url: "/settings/balance",
           },
         ],
       },

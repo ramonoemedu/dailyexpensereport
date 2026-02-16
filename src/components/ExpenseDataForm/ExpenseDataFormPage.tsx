@@ -23,7 +23,7 @@ import dayjs from "dayjs";
 import { dateFields } from "@/utils/KeySanitizer";
 import { ExpenseDataTable } from "./ExpenseDataTable";
 import { cn } from "@/lib/NextAdmin/utils";
-import { refineDescription, getSmartSuggestions } from "@/utils/DescriptionHelper";
+import { refineDescription, getSmartSuggestions, autoCategorize } from "@/utils/DescriptionHelper";
 
 type Props = {
   columns: string[];
@@ -100,6 +100,13 @@ const ExpenseDataFormPage: React.FC<Props> = ({
 
   const handleDescChange = (val: string) => {
     handleChange("Description", val);
+    
+    // Auto Categorize
+    const category = autoCategorize(val, form["Category"]);
+    if (category !== form["Category"]) {
+      handleChange("Category", category);
+    }
+
     if (val.length > 0) {
       const filtered = getSmartSuggestions(val, uniqueDescriptions);
       setSuggestions(filtered);
@@ -200,13 +207,12 @@ const ExpenseDataFormPage: React.FC<Props> = ({
                   <h3 className="text-lg font-bold text-dark dark:text-white text-heading-6">Expense Details</h3>
                 </div>
                 <div className="grid grid-cols-1 gap-x-6 gap-y-5 sm:grid-cols-2">
-                  {/* Explicitly add Type which was removed from columns list, removed Category */}
-                  {["Type", ...columns].map((col) => {
+                  {columns.map((col) => {
                     if (col === "Credit" || col === "Date" || col === "Category") return null;
 
                     const isDebit = col === "Debit";
                     const isDescription = col === "Description";
-                    const label = isDebit ? "Amount" : col;
+                    const label = isDebit ? "Amount" : (col === "Type" ? "Expense Type" : col);
                     const valueKey = isDebit ? "Amount (Income/Expense)" : col;
 
                     let options = dropdownOptions[col];

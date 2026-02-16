@@ -83,12 +83,12 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2 sm:gap-6 xl:grid-cols-4 2xl:gap-7.5">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 2xl:gap-7.5">
           <OverviewCard
-            label="Monthly Transactions"
+            label="Starting Balance"
             data={{
-              value: stats.monthlyTransactions.toString(),
-              growthRate: stats.growth.total,
+              value: `$${(stats.startingBalance || 0).toLocaleString()}`,
+              growthRate: 0,
             }}
             Icon={ViewsIcon}
           />
@@ -103,6 +103,15 @@ export default function DashboardPage() {
           />
 
           <OverviewCard
+            label="Bank Balance"
+            data={{
+              value: `$${((stats.startingBalance || 0) + stats.monthlyIncome - stats.monthlyAmount).toLocaleString()}`,
+              growthRate: 0,
+            }}
+            Icon={ProfitIcon}
+          />
+
+          <OverviewCard
             label="Income (Current / Total)"
             data={{
               value: `$${stats.monthlyIncome.toLocaleString()} / $${stats.monthlyIncomeWithFuture?.toLocaleString() ?? 0}`,
@@ -112,9 +121,9 @@ export default function DashboardPage() {
           />
 
           <OverviewCard
-            label="Top Category"
+            label="Top Expense Category"
             data={{
-              value: stats.topCategory,
+              value: stats.topCategory || "None",
               growthRate: 0,
             }}
             Icon={UsersIcon}

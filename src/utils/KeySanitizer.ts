@@ -22,8 +22,10 @@ export const unsanitizeKey = (key: string) =>
 
 export const columns = [
   "Date",
-  "Payment Method",
   "Description",
+  "Category",
   "Debit",
   "Credit",
+  "Type",
+  "Payment Method",
 ];

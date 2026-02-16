@@ -53,3 +53,72 @@ export function getSmartSuggestions(input: string, allDescriptions: string[]): s
     })
     .slice(0, 10); // Show top 10 relevant matches
 }
+
+/**
+ * Automatically categorizes a description based on keywords.
+ */
+export function autoCategorize(description: string, currentCategory?: string): string {
+  // If user already picked a specific category, don't override it unless it's empty
+  if (currentCategory && currentCategory !== "Uncategorized" && currentCategory !== "General/Other" && currentCategory !== "") {
+    return currentCategory;
+  }
+  
+  const desc = description.toLowerCase();
+  
+  // Food & Dining
+  if (
+    desc.includes("café") || desc.includes("lunch") || desc.includes("dinner") || 
+    desc.includes("food") || desc.includes("restaurant") || desc.includes("drink") || 
+    desc.includes("matcha") || desc.includes("coffee") || desc.includes("coconut") ||
+    desc.includes("bread") || desc.includes("water") || desc.includes("ice cream") ||
+    desc.includes("burger") || desc.includes("pizza") || desc.includes("kfc") ||
+    desc.includes("meat") || desc.includes("vegetable") || desc.includes("fruit")
+  ) return "Food & Dining";
+
+  // Transportation
+  if (
+    desc.includes("gasoline") || desc.includes("taxi") || desc.includes("grab") || 
+    desc.includes("car") || desc.includes("hometown") || desc.includes("tuktuk") ||
+    desc.includes("passapp") || desc.includes("fuel") || desc.includes("parking")
+  ) return "Transportation";
+
+  // Utilities & Bills
+  if (
+    desc.includes("electricity") || desc.includes("water bill") || desc.includes("internet") || 
+    desc.includes("phone") || desc.includes("top up") || desc.includes("mobile data")
+  ) return "Utilities";
+
+  // Salary/Income
+  if (
+    desc.includes("salary") || desc.includes("income") || desc.includes("bonus") || 
+    desc.includes("receive") || desc.includes("interest")
+  ) return "Salary/Income";
+
+  // Personal Care
+  if (
+    desc.includes("nail") || desc.includes("cream") || desc.includes("skincare") || 
+    desc.includes("body") || desc.includes("hair") || desc.includes("massage") ||
+    desc.includes("shampoo") || desc.includes("soap")
+  ) return "Personal Care";
+
+  // Loans & Debt
+  if (
+    desc.includes("loan") || desc.includes("aeon") || desc.includes("interest") ||
+    desc.includes("credit card") || desc.includes("pay back")
+  ) return "Loans & Debt";
+
+  // Family Support
+  if (
+    desc.includes("mak") || desc.includes("pa") || desc.includes("pha") || 
+    desc.includes("hea") || desc.includes("send to") || desc.includes("family") ||
+    desc.includes("support")
+  ) return "Family Support";
+
+  // Shopping
+  if (
+    desc.includes("clothes") || desc.includes("shoes") || desc.includes("electronic") ||
+    desc.includes("iphone") || desc.includes("gadget") || desc.includes("mall")
+  ) return "Shopping";
+  
+  return "General/Other";
+}

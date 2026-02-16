@@ -15,6 +15,7 @@ import VisibilityIcon from "@mui/icons-material/Visibility";
 import DeleteIcon from "@mui/icons-material/Delete";
 import { dateFields, formatDisplayDate } from "@/utils/KeySanitizer";
 import { cn } from "@/lib/NextAdmin/utils";
+import dayjs from "dayjs";
 
 type Props = {
   columns: string[];
@@ -54,7 +55,7 @@ export function ExpenseDataTable({
                     (col === "Debit" || col === "Credit" || col === "Amount") ? "text-right" : "text-left"
                   )}
                 >
-                  {col}
+                  {col === "Type" ? "Expense Type" : col}
                 </TableHead>
               ))}
               <TableHead className="sticky right-0 z-10 bg-[#F7F9FC] dark:bg-dark-2 text-center px-4">
@@ -76,12 +77,20 @@ export function ExpenseDataTable({
                 </TableCell>
               </TableRow>
             ) : (
-              rows.map((row, idx) => (
-                <TableRow
-                  key={row.id || idx}
-                  className="group border-stroke hover:bg-gray-2/50 dark:border-dark-3 dark:hover:bg-dark-2/50 transition-colors"
-                >
-                  {columns.map((col) => {
+              rows.map((row, idx) => {
+                const isToday = row["Date"] === dayjs().format("YYYY-MM-DD");
+                
+                return (
+                  <TableRow
+                    key={row.id || idx}
+                    className={cn(
+                      "group border-stroke transition-colors",
+                      isToday 
+                        ? "bg-gradient-to-r from-primary/5 via-primary/10 to-transparent dark:from-primary/10 dark:via-primary/20 dark:to-transparent border-l-4 border-l-primary" 
+                        : "hover:bg-gray-2/50 dark:border-dark-3 dark:hover:bg-dark-2/50"
+                    )}
+                  >
+                    {columns.map((col) => {
                     const isIncome = row["Type"] === "Income";
                     let displayVal = row[col];
                     let cellClass = "text-left";
@@ -156,9 +165,10 @@ export function ExpenseDataTable({
                     </div>
                   </TableCell>
                 </TableRow>
-              ))
-            )}
-          </TableBody>
+              );
+            })
+          )}
+        </TableBody>
         </Table>
       </div>
     </div>
