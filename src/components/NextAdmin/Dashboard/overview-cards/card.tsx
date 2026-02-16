@@ -37,7 +37,8 @@ export function OverviewCard({ label, data, Icon, gradient }: PropsType) {
         "absolute -top-2 -right-2 transition-transform duration-500 group-hover:-translate-x-2 group-hover:translate-y-2 group-hover:rotate-12",
         gradient ? "text-white/10" : "text-primary/5"
       )}>
-        <Icon className="w-24 h-24" />
+        <Icon className="w-24 h-24"
+        />
       </div>
 
       <div className="relative z-10 flex flex-col justify-between h-full">
@@ -54,10 +55,10 @@ export function OverviewCard({ label, data, Icon, gradient }: PropsType) {
         {/* Floating Mini Icon (Top Right) - Smaller and doesn't overlap */}
         <div className="absolute top-0 right-0">
           <div className={cn(
-            "rounded-xl p-2 backdrop-blur-md border border-white/10",
-            gradient ? "bg-white/10" : "bg-gray-100 dark:bg-white/5 text-primary"
+            "rounded-2xl p-2 backdrop-blur-md border border-white/10",
+            gradient ? "bg-white/15" : "bg-gray-100 dark:bg-white/5 text-primary"
           )}>
-            <Icon className="w-5 h-5" />
+            <Icon className="w-7 h-7" />
           </div>
         </div>
 
