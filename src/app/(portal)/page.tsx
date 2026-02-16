@@ -12,12 +12,12 @@ import { PaymentsOverview } from "@/components/NextAdmin/Charts/payments-overvie
 import { WeeksProfit } from "@/components/NextAdmin/Charts/weeks-profit";
 import { getClearPortStats } from "@/services/charts.services";
 import { Skeleton } from "@mui/material";
+import { cn } from "@/lib/NextAdmin/utils";
 
 export default function DashboardPage() {
   const [stats, setStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  // Use current date as default state
   const [month, setMonth] = useState(new Date().getMonth());
   const [year, setYear] = useState(new Date().getFullYear());
 
@@ -38,7 +38,6 @@ export default function DashboardPage() {
     return () => { isMounted = false; };
   }, [month, year]);
 
-  // Memoize constants to prevent re-renders
   const months = useMemo(() => [
     "January", "February", "March", "April", "May", "June",
     "July", "August", "September", "October", "November", "December"
@@ -48,12 +47,12 @@ export default function DashboardPage() {
 
   if (loading || !stats) {
     return (
-      <div className="mx-auto w-full max-w-full space-y-6 p-4">
+      <div className="mx-auto w-full max-w-full space-y-6 p-4 md:p-6">
         <div className="flex flex-col gap-6">
-          <Skeleton variant="rectangular" height={100} className="rounded-2xl" sx={{ bgcolor: 'rgba(0,0,0,0.05)' }} />
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            {[...Array(4)].map((_, i) => (
-              <Skeleton key={i} variant="rectangular" height={160} className="rounded-2xl" />
+          <Skeleton variant="rectangular" height={80} className="rounded-2xl" sx={{ bgcolor: 'rgba(0,0,0,0.05)' }} />
+          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+            {[...Array(5)].map((_, i) => (
+              <Skeleton key={i} variant="rectangular" height={140} className="rounded-[32px]" />
             ))}
           </div>
         </div>
@@ -61,27 +60,27 @@ export default function DashboardPage() {
     );
   }
 
-  // Calculate Bank Balance safely
   const bankBalance = (stats.startingBalance || 0) + (stats.monthlyIncome || 0) - (stats.monthlyAmount || 0);
 
   return (
     <div className="mx-auto w-full max-w-full space-y-8 p-4 md:p-6 animate-fade-in">
+
       {/* --- Header Section --- */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-extrabold tracking-tight text-dark dark:text-white">
+          <h1 className="text-3xl font-black tracking-tight text-dark dark:text-white">
             Financial Analytics
           </h1>
-          <p className="text-base font-medium text-gray-500 dark:text-gray-400">
+          <p className="text-base font-medium text-gray-500">
             Insights for {months[month]} {year}
           </p>
         </div>
 
-        <div className="flex items-center gap-3 bg-white dark:bg-dark-2 p-2 rounded-xl shadow-sm border border-stroke dark:border-dark-3">
+        <div className="flex items-center gap-3 bg-white dark:bg-dark-2 p-2 rounded-2xl shadow-sm border border-stroke dark:border-dark-3">
           <select
             value={month}
             onChange={(e) => setMonth(parseInt(e.target.value))}
-            className="bg-transparent px-2 py-1 text-sm font-semibold outline-none cursor-pointer"
+            className="bg-transparent px-3 py-1 text-sm font-bold outline-none cursor-pointer"
           >
             {months.map((m, i) => <option key={m} value={i}>{m}</option>)}
           </select>
@@ -89,15 +88,15 @@ export default function DashboardPage() {
           <select
             value={year}
             onChange={(e) => setYear(parseInt(e.target.value))}
-            className="bg-transparent px-2 py-1 text-sm font-semibold outline-none cursor-pointer"
+            className="bg-transparent px-3 py-1 text-sm font-bold outline-none cursor-pointer"
           >
             {years.map(y => <option key={y} value={y}>{y}</option>)}
           </select>
         </div>
       </div>
 
-      {/* --- Modern Gradient Cards --- */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 2xl:gap-6">
+      {/* --- Top Gradient Cards --- */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <OverviewCard
           label="Initial Carryover"
           data={{
@@ -105,7 +104,7 @@ export default function DashboardPage() {
             growthRate: 0,
           }}
           Icon={ViewsIcon}
-          gradient="blue" // Ensure your OverviewCard component handles "blue" with a modern linear gradient
+          gradient="blue"
         />
 
         <OverviewCard
@@ -149,83 +148,147 @@ export default function DashboardPage() {
         />
       </div>
 
-      {/* --- Income Breakdown Table --- */}
-      <div className="rounded-2xl bg-white p-6 shadow-xl dark:bg-dark-2 border border-stroke dark:border-dark-3 transition-all">
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
-          <h3 className="text-xl font-bold text-dark dark:text-white">Monthly Income Breakdown</h3>
-          <div className="flex gap-4">
-            <div className="text-right">
-              <p className="text-xs uppercase text-gray-500 font-bold">Received</p>
-              <p className="text-lg font-bold text-success">${stats.monthlyIncome?.toLocaleString()}</p>
+      {/* --- Yearly Summary Compact Bento --- */}
+      <div className="col-span-12 grid grid-cols-1 md:grid-cols-2 gap-6">
+
+        {/* Yearly Revenue - Slim Version */}
+        <div className="group relative overflow-hidden rounded-[24px] bg-gradient-to-br from-emerald-600 to-teal-700 p-6 shadow-md transition-all hover:shadow-xl">
+          <div className="relative z-10 flex items-center justify-between">
+            <div>
+              <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-white/70">
+                Yearly Revenue ({year})
+              </h3>
+              <p className="mt-1 text-3xl font-black text-white">
+                ${stats.yearlyIncome?.toLocaleString()}
+              </p>
             </div>
-            <div className="text-right border-l pl-4 border-stroke dark:border-dark-3">
-              <p className="text-xs uppercase text-gray-500 font-bold">Projected</p>
-              <p className="text-lg font-bold text-primary">${stats.monthlyIncomeWithFuture?.toLocaleString()}</p>
+
+            {/* Icon is smaller and contained to the right */}
+            <div className="text-white/20 transition-transform group-hover:scale-110">
+              <ProfitIcon className="w-12 h-12" />
             </div>
           </div>
+          {/* Subtle background glow */}
+          <div className="absolute -right-2 -bottom-2 h-16 w-16 rounded-full bg-white/10 blur-xl" />
         </div>
 
-        <div className="overflow-hidden rounded-xl border border-stroke dark:border-dark-3">
-          <table className="w-full text-left">
-            <thead className="bg-gray-50 dark:bg-meta-4">
-              <tr>
-                <th className="px-6 py-4 text-sm font-semibold text-dark dark:text-white">Date</th>
-                <th className="px-6 py-4 text-sm font-semibold text-dark dark:text-white">Description</th>
-                <th className="px-6 py-4 text-sm font-semibold text-dark dark:text-white">Amount</th>
-                <th className="px-6 py-4 text-sm font-semibold text-dark dark:text-white text-right">Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-stroke dark:divide-dark-3">
-              {stats.monthlyIncomeItems?.map((item: any, index: number) => (
-                <tr key={index} className={`hover:bg-gray-50 dark:hover:bg-white/5 transition-colors ${item.isFuture ? "bg-blue-50/30 dark:bg-blue-900/10" : ""}`}>
-                  <td className="px-6 py-4 text-sm text-dark dark:text-white">{item.date}</td>
-                  <td className="px-6 py-4 text-sm text-dark dark:text-white font-medium">{item.description}</td>
-                  <td className="px-6 py-4 text-sm text-dark dark:text-white">${item.amount.toLocaleString()}</td>
-                  <td className="px-6 py-4 text-right">
-                    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-bold ${item.isFuture ? "bg-blue-100 text-blue-700" : "bg-emerald-100 text-emerald-700"}`}>
-                      {item.isFuture ? "Expected" : "Cleared"}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        {/* Yearly Outflow - Slim Version */}
+        <div className="group relative overflow-hidden rounded-[24px] bg-gradient-to-br from-rose-600 to-orange-600 p-6 shadow-md transition-all hover:shadow-xl">
+          <div className="relative z-10 flex items-center justify-between">
+            <div>
+              <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-white/70">
+                Yearly Outflow ({year})
+              </h3>
+              <p className="mt-1 text-3xl font-black text-white">
+                ${stats.yearlyExpense?.toLocaleString()}
+              </p>
+            </div>
+
+            <div className="text-white/20 transition-transform group-hover:scale-110">
+              <ProductIcon className="w-12 h-12" />
+            </div>
+          </div>
+          {/* Subtle background glow */}
+          <div className="absolute -right-2 -bottom-2 h-16 w-16 rounded-full bg-white/10 blur-xl" />
         </div>
+
       </div>
 
-      {/* --- Yearly Summary Bento --- */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="group relative overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-700 p-8 shadow-lg transition-transform hover:scale-[1.01]">
-          <div className="relative z-10 text-white">
-            <h3 className="text-sm font-bold uppercase tracking-widest opacity-80">Yearly Revenue ({year})</h3>
-            <p className="mt-2 text-5xl font-black">${stats.yearlyIncome?.toLocaleString()}</p>
-          </div>
-          <div className="absolute -right-4 -top-4 text-white/10 group-hover:scale-110 transition-transform">
-            <ProfitIcon fontSizeAdjust={140} />
-          </div>
-        </div>
-
-        <div className="group relative overflow-hidden rounded-2xl bg-gradient-to-br from-rose-500 to-red-700 p-8 shadow-lg transition-transform hover:scale-[1.01]">
-          <div className="relative z-10 text-white">
-            <h3 className="text-sm font-bold uppercase tracking-widest opacity-80">Yearly Outflow ({year})</h3>
-            <p className="mt-2 text-5xl font-black">${stats.yearlyExpense?.toLocaleString()}</p>
-          </div>
-          <div className="absolute -right-4 -top-4 text-white/10 group-hover:scale-110 transition-transform">
-            <ProductIcon
-              fontSizeAdjust={140}
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* --- Charts Section --- */}
+      {/* --- Main Dashboard Content --- */}
       <div className="grid grid-cols-12 gap-6">
-        <div className="col-span-12 xl:col-span-7 rounded-2xl bg-white dark:bg-dark-2 p-1 border border-stroke dark:border-dark-3 shadow-sm">
+
+        {/* Payments Chart */}
+        <div className="col-span-12 xl:col-span-8">
           <PaymentsOverview year={year} />
         </div>
-        <div className="col-span-12 xl:col-span-5 rounded-2xl bg-white dark:bg-dark-2 p-1 border border-stroke dark:border-dark-3 shadow-sm">
+
+        {/* Weekly Profit Chart */}
+        <div className="col-span-12 xl:col-span-4">
           <WeeksProfit month={month} year={year} />
         </div>
+
+        {/* --- Modern Income Breakdown Bento --- */}
+        <div className="col-span-12">
+          <div className="rounded-[32px] border border-stroke bg-white/50 p-8 shadow-sm backdrop-blur-xl transition-all dark:border-white/5 dark:bg-dark-2/50">
+            <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
+              <div>
+                <h3 className="text-2xl font-black tracking-tight text-dark dark:text-white">Income Streams</h3>
+                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400">Monthly Revenue Detail</p>
+              </div>
+
+              <div className="flex gap-8">
+                <div className="group text-right">
+                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 group-hover:text-emerald-500 transition-colors">Collected</p>
+                  <p className="text-2xl font-black text-emerald-500">
+                    ${stats.monthlyIncome?.toLocaleString()}
+                  </p>
+                </div>
+                <div className="text-right border-l border-stroke pl-8 dark:border-white/10">
+                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400">Projected</p>
+                  <p className="text-2xl font-black text-blue-500">
+                    ${stats.monthlyIncomeWithFuture?.toLocaleString()}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="overflow-hidden rounded-2xl border border-stroke bg-white/30 dark:border-white/5 dark:bg-transparent">
+              <table className="w-full text-left">
+                <thead>
+                  <tr className="bg-gray-50/50 dark:bg-white/5">
+                    <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-gray-500">Date</th>
+                    <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-gray-500">Transaction</th>
+                    <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-gray-500">Amount</th>
+                    <th className="px-6 py-4 text-right text-[10px] font-black uppercase tracking-widest text-gray-500">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-stroke dark:divide-white/5">
+                  {stats.monthlyIncomeItems?.map((item: any, index: number) => (
+                    <tr
+                      key={index}
+                      className={cn(
+                        "group transition-colors hover:bg-gray-50/50 dark:hover:bg-white/5",
+                        item.isFuture && "bg-blue-50/10 dark:bg-blue-500/5"
+                      )}
+                    >
+                      <td className="px-6 py-4 text-xs font-medium text-gray-500">{item.date}</td>
+                      <td className="px-6 py-4">
+                        <span className="text-xs font-bold text-dark dark:text-white group-hover:text-primary transition-colors">
+                          {item.description}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="text-sm font-black text-dark dark:text-white">
+                          ${item.amount.toLocaleString()}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        <span className={cn(
+                          "inline-flex items-center rounded-lg px-3 py-1 text-[9px] font-black uppercase tracking-wider",
+                          item.isFuture
+                            ? "bg-blue-500/10 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400"
+                            : "bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400"
+                        )}>
+                          <span className={cn("mr-1.5 h-1 w-1 rounded-full", item.isFuture ? "bg-blue-500" : "bg-emerald-500")} />
+                          {item.isFuture ? "Expected" : "Received"}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                  {(!stats.monthlyIncomeItems || stats.monthlyIncomeItems.length === 0) && (
+                    <tr>
+                      <td colSpan={4} className="py-12 text-center text-xs font-bold text-gray-400 italic">
+                        No income data available for this period.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+
       </div>
     </div>
   );

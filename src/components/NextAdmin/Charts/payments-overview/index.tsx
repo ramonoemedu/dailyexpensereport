@@ -1,88 +1,144 @@
 "use client";
 
-import { PeriodPicker } from "@/components/NextAdmin/period-picker";
-import { standardFormat } from "@/lib/NextAdmin/format-number";
-import { cn } from "@/lib/NextAdmin/utils";
+import React, { useEffect, useState } from "react";
+import { useIsMobile } from "@/hooks/NextAdmin/use-mobile";
 import { getPaymentsOverviewData } from "@/services/charts.services";
-import { PaymentsOverviewChart } from "./chart";
-import { useEffect, useState } from "react";
 import { Skeleton } from "@mui/material";
+import { cn } from "@/lib/NextAdmin/utils";
+import type { ApexOptions } from "apexcharts";
+import dynamic from "next/dynamic";
+import { useTheme } from "next-themes";
+
+const Chart = dynamic(() => import("react-apexcharts"), { ssr: false });
 
 type PropsType = {
   year?: number;
   className?: string;
 };
 
-export function PaymentsOverview({
-  year: propYear,
-  className,
-}: PropsType) {
-  const [internalYear, setInternalYear] = useState(new Date().getFullYear());
-  const year = propYear !== undefined ? propYear : internalYear;
+export function PaymentsOverview({ year: propYear, className }: PropsType) {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const { resolvedTheme } = useTheme();
+  const isMobile = useIsMobile();
+  const isDark = resolvedTheme === "dark";
+
+  // Use the year passed via props, or default to current year
+  const year = propYear || new Date().getFullYear();
 
   useEffect(() => {
     async function loadData() {
       setLoading(true);
-      const result = await getPaymentsOverviewData(year);
-      setData(result);
-      setLoading(false);
+      try {
+        const result = await getPaymentsOverviewData(year);
+        setData(result);
+      } catch (error) {
+        console.error("Failed to load payments data:", error);
+      } finally {
+        setLoading(false);
+      }
     }
     loadData();
   }, [year]);
 
+  const options: ApexOptions = {
+    colors: ["#10B981", "#EF4444"], // Emerald (Income) & Rose (Expense)
+    chart: {
+      type: "area",
+      toolbar: { show: false },
+      fontFamily: "inherit",
+      dropShadow: {
+        enabled: true,
+        top: 10,
+        blur: 4,
+        color: "#000",
+        opacity: 0.1,
+      },
+    },
+    stroke: {
+      curve: "smooth",
+      width: isMobile ? 2 : 4,
+      lineCap: "round",
+    },
+    fill: {
+      type: "gradient",
+      gradient: {
+        shadeIntensity: 1,
+        opacityFrom: 0.4,
+        opacityTo: 0,
+        stops: [0, 90, 100],
+      },
+    },
+    grid: {
+      borderColor: isDark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.05)",
+      strokeDashArray: 10,
+      xaxis: { lines: { show: false } },
+      yaxis: { lines: { show: true } },
+    },
+    markers: {
+      size: 0,
+      hover: { size: 6 },
+    },
+    xaxis: {
+      axisBorder: { show: false },
+      axisTicks: { show: false },
+      labels: {
+        style: {
+          colors: isDark ? "#64748b" : "#94a3b8",
+          fontSize: "12px",
+          fontWeight: 600,
+        },
+      },
+    },
+    yaxis: {
+      labels: {
+        style: {
+          colors: isDark ? "#64748b" : "#94a3b8",
+          fontSize: "12px",
+          fontWeight: 600,
+        },
+        formatter: (val) => `$${val >= 1000 ? (val / 1000).toFixed(1) + 'k' : val}`,
+      },
+    },
+    tooltip: {
+      theme: isDark ? "dark" : "light",
+      x: { show: false },
+      style: { fontSize: "12px" },
+    },
+  };
+
   if (loading || !data) {
     return (
-      <div className={cn("rounded-[10px] bg-white p-7.5 shadow-1 dark:bg-dark-2", className)}>
-        <Skeleton variant="text" width="40%" height={32} className="mb-4" />
-        <Skeleton variant="rectangular" height={300} className="rounded-xl" />
+      <div className={cn("rounded-[32px] bg-white p-8 dark:bg-dark-2", className)}>
+        <Skeleton variant="text" width="40%" height={32} className="mb-6" />
+        <Skeleton variant="rectangular" height={300} className="rounded-2xl" />
       </div>
     );
   }
 
-  const years = [2024, 2025, 2026];
-
   return (
-    <div
-      className={cn(
-        "grid gap-2 rounded-[10px] bg-white px-7.5 pb-6 pt-7.5 shadow-1 dark:bg-dark-2 dark:shadow-card",
-        className,
-      )}
-    >
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <h2 className="text-body-2xlg font-bold text-dark dark:text-white">
-          Monthly Income vs Expenses
+    <div className={cn(
+      "rounded-[32px] border border-stroke bg-white p-8 shadow-sm dark:border-white/5 dark:bg-dark-2/50 backdrop-blur-md",
+      className
+    )}>
+      <div className="mb-6">
+        <h2 className="text-xl font-black tracking-tight text-dark dark:text-white">
+          Cash Flow Analytics
         </h2>
-
-        <div className="flex items-center gap-3">
-          <select 
-            value={year} 
-            onChange={(e) => setInternalYear(parseInt(e.target.value))}
-            className="rounded-lg border border-stroke bg-transparent px-4 py-2 text-sm font-medium outline-none focus:border-primary dark:border-dark-3 dark:bg-dark-2"
-          >
-            {years.map(y => <option key={y} value={y}>{y}</option>)}
-          </select>
-        </div>
+        <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Monthly overview for {year}</p>
       </div>
 
-      <PaymentsOverviewChart data={data} />
-
-      <dl className="grid divide-stroke text-center dark:divide-dark-3 sm:grid-cols-2 sm:divide-x [&>div]:flex [&>div]:flex-col-reverse [&>div]:gap-1">
-        <div className="dark:border-dark-3 max-sm:mb-3 max-sm:border-b max-sm:pb-3">
-          <dt className="text-xl font-bold text-success">
-            ${standardFormat(data.income.reduce((acc: any, { y }: any) => acc + y, 0))}
-          </dt>
-          <dd className="font-medium dark:text-dark-6">Total Income</dd>
-        </div>
-
-        <div>
-          <dt className="text-xl font-bold text-danger">
-            ${standardFormat(data.expense.reduce((acc: any, { y }: any) => acc + y, 0))}
-          </dt>
-          <dd className="font-medium dark:text-dark-6">Total Expenses</dd>
-        </div>
-      </dl>
+      <div className="-ml-4 h-[320px] w-[105%]">
+        <Chart
+          options={options}
+          series={[
+            { name: "Income", data: data.income || [] },
+            { name: "Expense", data: data.expense || [] },
+          ]}
+          type="area"
+          height={320}
+        />
+      </div>
     </div>
   );
 }

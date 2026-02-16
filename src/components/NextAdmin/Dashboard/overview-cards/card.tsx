@@ -1,6 +1,7 @@
+'use client';
+
 import { cn } from "@/lib/NextAdmin/utils";
-import type { SVGProps } from "react";
-import { ArrowDownIcon, ArrowUpIcon } from "@/assets/icons";
+import type { SVGProps, ComponentType } from "react";
 
 type PropsType = {
   label: string;
@@ -8,68 +9,66 @@ type PropsType = {
     value: number | string;
     growthRate?: number;
   };
-  Icon: React.ComponentType<SVGProps<SVGSVGElement>>;
+  Icon: ComponentType<SVGProps<SVGSVGElement>>;
   gradient?: "blue" | "green" | "red" | "purple" | "orange" | "dark";
 };
 
 const gradients = {
-  blue: "bg-gradient-to-br from-blue-700 via-blue-600 to-blue-500 text-white border-blue-400/20 hover:shadow-blue-500/40",
-  green: "bg-gradient-to-br from-emerald-700 via-emerald-600 to-teal-500 text-white border-emerald-400/20 hover:shadow-emerald-500/40",
-  red: "bg-gradient-to-br from-rose-700 via-rose-600 to-orange-500 text-white border-rose-400/20 hover:shadow-rose-500/40",
-  purple: "bg-gradient-to-br from-violet-700 via-violet-600 to-purple-500 text-white border-purple-400/20 hover:shadow-violet-500/40",
-  orange: "bg-gradient-to-br from-amber-700 via-amber-600 to-yellow-500 text-white border-amber-400/20 hover:shadow-amber-500/40",
-  dark: "bg-gradient-to-br from-slate-900 via-slate-800 to-slate-700 text-white border-slate-700/30 hover:shadow-slate-950/40",
+  blue: "bg-gradient-to-br from-blue-600 to-blue-400 text-white shadow-blue-500/10",
+  green: "bg-gradient-to-br from-emerald-600 to-teal-500 text-white shadow-emerald-500/10",
+  red: "bg-gradient-to-br from-rose-600 to-pink-500 text-white shadow-rose-500/10",
+  purple: "bg-gradient-to-br from-violet-600 to-purple-500 text-white shadow-purple-500/10",
+  orange: "bg-gradient-to-br from-orange-500 to-amber-400 text-white shadow-orange-500/10",
+  dark: "bg-gradient-to-br from-slate-900 to-slate-700 text-white shadow-slate-900/10",
 };
 
 export function OverviewCard({ label, data, Icon, gradient }: PropsType) {
-  const isDecreasing = (data.growthRate || 0) < 0;
-  const gradientClass = gradient ? gradients[gradient] : "bg-white/80 dark:bg-dark-2/80 border-white/20";
-
   return (
     <div className={cn(
-      "relative overflow-hidden rounded-[24px] p-7 border transition-all duration-300 ease-out hover:scale-[1.03] hover:z-10",
-      gradientClass,
-      "shadow-[0_8px_32px_0_rgba(31,38,135,0.15)] group"
+      "relative group overflow-hidden rounded-[28px] p-6 transition-all duration-300",
+      "hover:scale-[1.02] hover:shadow-xl border border-transparent",
+      gradient ? gradients[gradient] : "bg-white dark:bg-dark-2 text-dark dark:text-white border-stroke dark:border-white/5"
     )}>
-      {/* Glossy overlay effect */}
-      <div className="absolute inset-0 bg-gradient-to-tr from-white/10 to-transparent pointer-events-none"></div>
+      {/* Glossy Overlay */}
+      <div className="absolute inset-0 bg-gradient-to-tr from-white/10 to-transparent pointer-events-none" />
 
-      {/* Top-right minimalist icon */}
-      <div className="absolute top-5 right-5 opacity-20 transform group-hover:scale-110 transition-transform duration-300">
-        <Icon className={cn("size-8", gradient ? "text-white" : "text-primary")} />
+      {/* --- BACKGROUND ICON: This prevents the icon from blocking the text --- */}
+      <div className={cn(
+        "absolute -top-2 -right-2 transition-transform duration-500 group-hover:-translate-x-2 group-hover:translate-y-2 group-hover:rotate-12",
+        gradient ? "text-white/10" : "text-primary/5"
+      )}>
+        <Icon className="w-24 h-24" />
       </div>
 
-      <div className="relative z-10 flex flex-col h-full justify-between">
-        <div>
-          <p className={cn(
-            "text-[10px] font-black uppercase tracking-[0.15em] mb-1",
-            gradient ? "text-white/70" : "text-dark-6"
-          )}>
+      <div className="relative z-10 flex flex-col justify-between h-full">
+        <div className="flex flex-col">
+          <p className="text-[10px] font-black uppercase tracking-[0.2em] opacity-70 mb-1 truncate pr-10">
             {label}
           </p>
-          
-          <h3 className={cn(
-            "text-3xl font-black tracking-tight mb-4",
-            gradient ? "text-white" : "text-dark dark:text-white"
-          )}>
+
+          <h3 className="text-2xl font-black tracking-tight leading-none break-words">
             {data.value}
           </h3>
         </div>
 
+        {/* Floating Mini Icon (Top Right) - Smaller and doesn't overlap */}
+        <div className="absolute top-0 right-0">
+          <div className={cn(
+            "rounded-xl p-2 backdrop-blur-md border border-white/10",
+            gradient ? "bg-white/10" : "bg-gray-100 dark:bg-white/5 text-primary"
+          )}>
+            <Icon className="w-5 h-5" />
+          </div>
+        </div>
+
+        {/* Growth Badge */}
         {data.growthRate !== undefined && data.growthRate !== 0 && (
-          <div
-            className={cn(
-              "inline-flex items-center self-start text-[11px] font-black px-2.5 py-1 rounded-full backdrop-blur-sm",
-              gradient ? "bg-white/20 text-white" : (isDecreasing ? "bg-red/10 text-red" : "bg-green/10 text-green"),
-            )}
-          >
-            {data.growthRate}%
-            <span className="ml-1 flex items-center">
-              {isDecreasing ? (
-                <ArrowDownIcon className="size-2.5" />
-              ) : (
-                <ArrowUpIcon className="size-2.5" />
-              )}
+          <div className="mt-4">
+            <span className={cn(
+              "inline-flex items-center rounded-lg px-2 py-0.5 text-[10px] font-black",
+              gradient ? "bg-white/20" : "bg-gray-100 dark:bg-white/5"
+            )}>
+              {data.growthRate > 0 ? "↑" : "↓"} {Math.abs(data.growthRate)}%
             </span>
           </div>
         )}
