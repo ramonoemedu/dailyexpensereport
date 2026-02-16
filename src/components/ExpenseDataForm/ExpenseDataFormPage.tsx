@@ -24,6 +24,7 @@ import { dateFields } from "@/utils/KeySanitizer";
 import { ExpenseDataTable } from "./ExpenseDataTable";
 import { cn } from "@/lib/NextAdmin/utils";
 import { refineDescription, getSmartSuggestions, autoCategorize } from "@/utils/DescriptionHelper";
+import { exchangeRateService } from "@/utils/exchangeRateService";
 
 type Props = {
   columns: string[];
@@ -86,6 +87,25 @@ const ExpenseDataFormPage: React.FC<Props> = ({
   const descriptionRef = React.useRef<HTMLInputElement>(null);
   const [showSuggestions, setShowSuggestions] = React.useState(false);
   const [suggestions, setSuggestions] = React.useState<string[]>([]);
+  const [exchangeRate, setExchangeRate] = React.useState<number>(4100);
+  const [khrAmount, setKhrAmount] = React.useState<string>("");
+
+  // Fetch exchange rate on dialog open
+  React.useEffect(() => {
+    if (dialogOpen) {
+      exchangeRateService.getUSDToKHRRate().then(rate => {
+        setExchangeRate(rate);
+      });
+    }
+  }, [dialogOpen]);
+
+  // Sync khrAmount if USD amount changes manually (optional, but good for UX)
+  // Or just reset when dialog opens
+  React.useEffect(() => {
+    if (dialogOpen && editIndex === null && !saving && !form["Description"]) {
+      setKhrAmount("");
+    }
+  }, [dialogOpen, editIndex, saving, form["Description"]]);
 
   // Auto-focus description when dialog opens or after a save (indicated by form clearing)
   React.useEffect(() => {
@@ -100,7 +120,7 @@ const ExpenseDataFormPage: React.FC<Props> = ({
 
   const handleDescChange = (val: string) => {
     handleChange("Description", val);
-    
+
     // Auto Categorize
     const category = autoCategorize(val, form["Category"]);
     if (category !== form["Category"]) {
@@ -212,61 +232,89 @@ const ExpenseDataFormPage: React.FC<Props> = ({
 
                     const isDebit = col === "Debit";
                     const isDescription = col === "Description";
-                    const label = isDebit ? "Amount" : (col === "Type" ? "Expense Type" : col);
+                    const label = isDebit ? "Amount (USD)" : (col === "Type" ? "Expense Type" : col);
                     const valueKey = isDebit ? "Amount (Income/Expense)" : col;
 
                     let options = dropdownOptions[col];
 
+                    const handleKhrChange = (val: string) => {
+                      const numericVal = val.replace(/[^0-9]/g, '');
+                      setKhrAmount(numericVal);
+                      if (numericVal) {
+                        const usdAmount = exchangeRateService.convertToUSD(parseFloat(numericVal), exchangeRate);
+                        handleChange("Amount (Income/Expense)", usdAmount.toString());
+                      }
+                    };
+
                     return (
-                      <FormField key={col} label={label} className={isDescription ? "relative" : ""}>
-                        {options ? (
-                          <select
-                            value={form[valueKey] || "Expense"}
-                            onChange={(e) => handleChange(valueKey, e.target.value)}
-                            className="w-full rounded-xl border border-stroke bg-gray-2 px-4 py-2.5 text-sm text-dark outline-none transition-all focus:border-primary focus:ring-4 focus:ring-primary/10 dark:border-dark-3 dark:bg-dark-2 dark:text-white dark:focus:border-primary"
-                          >
-                            <option value="">Select {col}</option>
-                            {options.map((opt) => (
-                              <option key={opt} value={opt}>{opt}</option>
-                            ))}
-                          </select>
-                        ) : (
-                          <>
-                            <input
-                              ref={isDescription ? descriptionRef : undefined}
-                              type="text"
-                              value={form[valueKey] || ""}
-                              onChange={(e) => isDescription ? handleDescChange(e.target.value) : handleChange(valueKey, e.target.value)}
-                              onBlur={isDescription ? handleDescBlur : undefined}
-                              onInput={(e) => {
-                                if (isDebit) {
-                                  (e.target as HTMLInputElement).value = (e.target as HTMLInputElement).value.replace(/[^0-9.,]/g, '');
-                                }
-                              }}
-                              autoComplete="off"
-                              placeholder={`Enter ${label.toLowerCase()}`}
-                              className="w-full rounded-xl border border-stroke bg-gray-2 px-4 py-2.5 text-sm text-dark outline-none transition-all focus:border-primary focus:ring-4 focus:ring-primary/10 dark:border-dark-3 dark:bg-dark-2 dark:text-white dark:focus:border-primary"
-                            />
-                            {isDescription && showSuggestions && (
-                              <div className="absolute left-0 top-full z-[999] mt-1 w-full rounded-xl border border-stroke bg-white py-2 shadow-lg dark:border-dark-3 dark:bg-dark-2">
-                                {suggestions.map((s, i) => (
-                                  <button
-                                    key={i}
-                                    type="button"
-                                    className="w-full px-4 py-2 text-left text-sm text-dark hover:bg-primary/5 hover:text-primary dark:text-white"
-                                    onClick={() => {
-                                      handleChange("Description", s);
-                                      setShowSuggestions(false);
-                                    }}
-                                  >
-                                    {s}
-                                  </button>
-                                ))}
+                      <React.Fragment key={col}>
+                        {isDebit && form["Payment Method"] === "Cash" && (
+                          <FormField label="Amount (KHR)">
+                            <div className="relative">
+                              <input
+                                type="text"
+                                value={khrAmount}
+                                onChange={(e) => handleKhrChange(e.target.value)}
+                                autoComplete="off"
+                                placeholder="Enter amount in Riel"
+                                className="w-full rounded-xl border border-stroke bg-gray-2 px-4 py-2.5 text-sm text-dark outline-none transition-all focus:border-primary focus:ring-4 focus:ring-primary/10 dark:border-dark-3 dark:bg-dark-2 dark:text-white dark:focus:border-primary"
+                              />
+                              <div className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-bold text-dark-5 dark:text-dark-6 bg-white dark:bg-dark-3 px-2 py-1 rounded-lg border border-stroke dark:border-dark-4">
+                                Rate: 1$ = {exchangeRate}៛
                               </div>
-                            )}
-                          </>
+                            </div>
+                          </FormField>
                         )}
-                      </FormField>
+                        <FormField label={label} className={isDescription ? "relative" : ""}>
+                          {options ? (
+                            <select
+                              value={form[valueKey] || "Expense"}
+                              onChange={(e) => handleChange(valueKey, e.target.value)}
+                              className="w-full rounded-xl border border-stroke bg-gray-2 px-4 py-2.5 text-sm text-dark outline-none transition-all focus:border-primary focus:ring-4 focus:ring-primary/10 dark:border-dark-3 dark:bg-dark-2 dark:text-white dark:focus:border-primary"
+                            >
+                              <option value="">Select {col}</option>
+                              {options.map((opt) => (
+                                <option key={opt} value={opt}>{opt}</option>
+                              ))}
+                            </select>
+                          ) : (
+                            <>
+                              <input
+                                ref={isDescription ? descriptionRef : undefined}
+                                type="text"
+                                value={form[valueKey] || ""}
+                                onChange={(e) => isDescription ? handleDescChange(e.target.value) : handleChange(valueKey, e.target.value)}
+                                onBlur={isDescription ? handleDescBlur : undefined}
+                                onInput={(e) => {
+                                  if (isDebit) {
+                                    (e.target as HTMLInputElement).value = (e.target as HTMLInputElement).value.replace(/[^0-9.,]/g, '');
+                                  }
+                                }}
+                                autoComplete="off"
+                                placeholder={`Enter ${label.toLowerCase()}`}
+                                className="w-full rounded-xl border border-stroke bg-gray-2 px-4 py-2.5 text-sm text-dark outline-none transition-all focus:border-primary focus:ring-4 focus:ring-primary/10 dark:border-dark-3 dark:bg-dark-2 dark:text-white dark:focus:border-primary"
+                              />
+                              {isDescription && showSuggestions && (
+                                <div className="absolute left-0 top-full z-[999] mt-1 w-full rounded-xl border border-stroke bg-white py-2 shadow-lg dark:border-dark-3 dark:bg-dark-2">
+                                  {suggestions.map((s, i) => (
+                                    <button
+                                      key={i}
+                                      type="button"
+                                      className="w-full px-4 py-2 text-left text-sm text-dark hover:bg-primary/5 hover:text-primary dark:text-white"
+                                      onClick={() => {
+                                        handleChange("Description", s);
+                                        setShowSuggestions(false);
+                                      }}
+                                    >
+                                      {s}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </FormField>
+                      </React.Fragment>
                     );
                   })}
 
