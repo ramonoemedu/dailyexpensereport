@@ -17,7 +17,11 @@ import {
 import { PAGE_SIZE, sanitizeKey, unsanitizeKey } from "@/utils/KeySanitizer";
 import { sendTelegramNotification, formatExpenseMessage } from "@/utils/telegramService";
 
-export function useExpenseData(options?: { paymentMethodFilter?: string | string[], balanceType?: 'bank' | 'cash' }) {
+export function useExpenseData(options?: { 
+  paymentMethodFilter?: string | string[], 
+  balanceType?: 'bank' | 'cash',
+  bankId?: string 
+}) {
   const [allRows, setAllRows] = useState<Record<string, any>[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -58,14 +62,33 @@ export function useExpenseData(options?: { paymentMethodFilter?: string | string
 
       // Fetch Balances
       const balanceSnapshot = await getDocs(collection(db, "settings"));
-      const balancePrefix = options?.balanceType === 'cash' ? "cash_balance_" : "balance_";
-      const balances = balanceSnapshot.docs
+      let balancePrefix = "balance_";
+      if (options?.balanceType === 'cash') {
+        balancePrefix = "cash_balance_";
+      } else if (options?.bankId) {
+        balancePrefix = `balance_${options.bankId}_`;
+      }
+
+      let balances = balanceSnapshot.docs
         .filter(d => d.id.startsWith(balancePrefix))
         .map(d => {
           const parts = d.id.split("_");
-          // parts will be ['balance', 'YYYY', 'MM'] or ['cash', 'balance', 'YYYY', 'MM']
-          const year = options?.balanceType === 'cash' ? parseInt(parts[2]) : parseInt(parts[1]);
-          const month = options?.balanceType === 'cash' ? parseInt(parts[3]) : parseInt(parts[2]);
+          let year, month;
+          
+          if (parts.length === 4) {
+            // Format: balance_bankId_YYYY_MM or cash_balance_YYYY_MM
+            year = parseInt(parts[2]);
+            month = parseInt(parts[3]);
+          } else if (parts.length === 3) {
+            // Format: balance_YYYY_MM
+            year = parseInt(parts[1]);
+            month = parseInt(parts[2]);
+          } else {
+            return null;
+          }
+
+          if (isNaN(year) || isNaN(month)) return null;
+
           return { 
             year, 
             month, 
@@ -73,7 +96,27 @@ export function useExpenseData(options?: { paymentMethodFilter?: string | string
             amountKHR: parseFloat(d.data().amountKHR || 0)
           };
         })
+        .filter((b): b is {year: number, month: number, amount: number, amountKHR: number} => b !== null)
         .sort((a, b) => (a.year * 12 + a.month) - (b.year * 12 + b.month));
+      
+      // Fallback for Chip Mong: if no chip-mong specific balance, try the generic one
+      if (options?.bankId === 'chip-mong' && balances.length === 0) {
+        balances = balanceSnapshot.docs
+          .filter(d => d.id.startsWith("balance_") && !d.id.includes("chip-mong") && !d.id.includes("cimb") && !d.id.includes("aba") && !d.id.includes("acleda"))
+          .map(d => {
+            const parts = d.id.split("_");
+            if (parts.length !== 3) return null;
+            return {
+              year: parseInt(parts[1]),
+              month: parseInt(parts[2]),
+              amount: parseFloat(d.data().amount || 0),
+              amountKHR: parseFloat(d.data().amountKHR || 0)
+            };
+          })
+          .filter((b): b is {year: number, month: number, amount: number, amountKHR: number} => b !== null)
+          .sort((a, b) => (a.year * 12 + a.month) - (b.year * 12 + b.month));
+      }
+      
       setBalanceRecords(balances);
 
     } catch (err) {
@@ -81,7 +124,7 @@ export function useExpenseData(options?: { paymentMethodFilter?: string | string
     } finally {
       setLoading(false);
     }
-  }, [options?.balanceType]);
+  }, [options?.balanceType, options?.bankId]);
 
   const filteredRows = useMemo(() => {
     return allRows.filter((row) => {

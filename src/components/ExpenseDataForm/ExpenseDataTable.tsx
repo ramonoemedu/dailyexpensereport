@@ -9,7 +9,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/NextAdmin/ui/table";
-import { IconButton, Tooltip } from "@mui/material";
+import { IconButton, Tooltip, Checkbox } from "@mui/material";
 import EditIcon from "@mui/icons-material/Edit";
 import VisibilityIcon from "@mui/icons-material/Visibility";
 import DeleteIcon from "@mui/icons-material/Delete";
@@ -23,6 +23,8 @@ type Props = {
   openEditDialog: (row: any, idx: number) => void;
   openDetailDialog: (row: any) => void;
   handleDeactivate: (id: string) => void;
+  selectedIds?: string[];
+  onSelectionChange?: (ids: string[]) => void;
 };
 
 const getBadgeStyles = (val: string) => {
@@ -40,13 +42,43 @@ export function ExpenseDataTable({
   openEditDialog,
   openDetailDialog,
   handleDeactivate,
+  selectedIds = [],
+  onSelectionChange,
 }: Props) {
+  const handleSelectAll = (checked: boolean) => {
+    if (onSelectionChange) {
+      if (checked) {
+        onSelectionChange(rows.map(row => row.id as string));
+      } else {
+        onSelectionChange([]);
+      }
+    }
+  };
+
+  const handleSelectRow = (id: string, checked: boolean) => {
+    if (onSelectionChange) {
+      if (checked) {
+        onSelectionChange([...selectedIds, id]);
+      } else {
+        onSelectionChange(selectedIds.filter(sid => sid !== id));
+      }
+    }
+  };
+
   return (
     <div className="rounded-[10px] border border-stroke bg-white shadow-1 dark:border-dark-3 dark:bg-gray-dark md:p-2">
       <div className="max-w-full overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow className="border-none bg-[#F7F9FC] dark:bg-dark-2 [&>th]:py-4 [&>th]:text-xs [&>th]:font-bold [&>th]:text-dark [&>th]:dark:text-white uppercase tracking-wider">
+              <TableHead className="w-10 px-3">
+                <Checkbox
+                  size="small"
+                  checked={rows.length > 0 && selectedIds.length === rows.length}
+                  indeterminate={selectedIds.length > 0 && selectedIds.length < rows.length}
+                  onChange={(e) => handleSelectAll(e.target.checked)}
+                />
+              </TableHead>
               {columns.map((col) => (
                 <TableHead 
                   key={col}
@@ -67,7 +99,7 @@ export function ExpenseDataTable({
             {rows.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={columns.length + 1}
+                  colSpan={columns.length + 2}
                   className="text-center py-12 text-dark-5"
                 >
                   <div className="flex flex-col items-center gap-2">
@@ -79,17 +111,27 @@ export function ExpenseDataTable({
             ) : (
               rows.map((row, idx) => {
                 const isToday = row["Date"] === dayjs().format("YYYY-MM-DD");
+                const isSelected = selectedIds.includes(row.id as string);
                 
                 return (
                   <TableRow
                     key={row.id || idx}
                     className={cn(
                       "group border-stroke transition-colors",
-                      isToday 
+                      isSelected ? "bg-primary/5 dark:bg-primary/10" : "",
+                      isToday && !isSelected
                         ? "bg-gradient-to-r from-primary/5 via-primary/10 to-transparent dark:from-primary/10 dark:via-primary/20 dark:to-transparent border-l-4 border-l-primary" 
                         : "hover:bg-gray-2/50 dark:border-dark-3 dark:hover:bg-dark-2/50"
                     )}
+                    onClick={() => handleSelectRow(row.id as string, !isSelected)}
                   >
+                    <TableCell className="w-10 px-3" onClick={(e) => e.stopPropagation()}>
+                      <Checkbox
+                        size="small"
+                        checked={isSelected}
+                        onChange={(e) => handleSelectRow(row.id as string, e.target.checked)}
+                      />
+                    </TableCell>
                     {columns.map((col) => {
                     const isIncome = row["Type"] === "Income";
                     let displayVal = row[col];

@@ -4,7 +4,11 @@ import { sanitizeKey } from "@/utils/KeySanitizer";
 import dayjs from "dayjs";
 import { autoCategorize } from "@/utils/DescriptionHelper";
 
-export async function getClearPortStats(month?: number, year?: number, options?: { paymentMethodFilter?: string | string[], currencyFilter?: string }) {
+export async function getClearPortStats(month?: number, year?: number, options?: { 
+  paymentMethodFilter?: string | string[], 
+  currencyFilter?: string,
+  bankId?: string
+}) {
   try {
     const snapshot = await getDocs(collection(db, "expenses"));
     const now = dayjs();
@@ -33,15 +37,33 @@ export async function getClearPortStats(month?: number, year?: number, options?:
 
     try {
       const balanceSnapshot = await getDocs(collection(db, "settings"));
-      const balancePrefix = isCashReport ? "cash_balance_" : "balance_";
+      let balancePrefix = "balance_";
+      if (isCashReport) {
+        balancePrefix = "cash_balance_";
+      } else if (options?.bankId) {
+        balancePrefix = `balance_${options.bankId}_`;
+      }
       
-      const balanceRecords = balanceSnapshot.docs
+      let balanceRecords = balanceSnapshot.docs
         .filter(d => d.id.startsWith(balancePrefix))
         .map(d => {
           const parts = d.id.split("_");
-          const year = isCashReport ? parseInt(parts[2]) : parseInt(parts[1]);
-          const month = isCashReport ? parseInt(parts[3]) : parseInt(parts[2]);
+          let year, month;
           
+          if (parts.length === 4) {
+            // Format: balance_bankId_YYYY_MM or cash_balance_YYYY_MM
+            year = parseInt(parts[2]);
+            month = parseInt(parts[3]);
+          } else if (parts.length === 3) {
+            // Format: balance_YYYY_MM
+            year = parseInt(parts[1]);
+            month = parseInt(parts[2]);
+          } else {
+            return null;
+          }
+          
+          if (isNaN(year) || isNaN(month)) return null;
+
           let amount = 0;
           if (isCashReport && options?.currencyFilter === "KHR") {
             amount = parseFloat(d.data().amountKHR || 0);
@@ -51,7 +73,23 @@ export async function getClearPortStats(month?: number, year?: number, options?:
 
           return { year, month, amount };
         })
+        .filter((r): r is {year: number, month: number, amount: number} => r !== null)
         .sort((a, b) => (a.year * 12 + a.month) - (b.year * 12 + b.month));
+
+      // Fallback for Chip Mong
+      if (options?.bankId === 'chip-mong' && balanceRecords.length === 0) {
+        balanceRecords = balanceSnapshot.docs
+          .filter(d => d.id.startsWith("balance_") && !d.id.includes("chip-mong") && !d.id.includes("cimb") && !d.id.includes("aba") && !d.id.includes("acleda"))
+          .map(d => {
+            const parts = d.id.split("_");
+            return {
+              year: parseInt(parts[1]),
+              month: parseInt(parts[2]),
+              amount: parseFloat(d.data().amount || 0)
+            };
+          })
+          .sort((a, b) => (a.year * 12 + a.month) - (b.year * 12 + b.month));
+      }
 
       const targetTime = targetYear * 12 + targetMonth;
       const anchor = [...balanceRecords].reverse().find(r => (r.year * 12 + r.month) <= targetTime);
@@ -72,37 +110,46 @@ export async function getClearPortStats(month?: number, year?: number, options?:
       const data = doc.data();
       if (data.status === 'inactive') return; // Skip inactive records
 
-      // Apply paymentMethodFilter - use sanitized key
+      // 1. Get Payment Method with fallbacks
+      const method = data["Payment_Method"] || data["Payment Method"];
+      
+      // Apply paymentMethodFilter
       if (options?.paymentMethodFilter) {
-        const method = data[sanitizeKey("Payment Method")] || data["Payment Method"];
         if (Array.isArray(options.paymentMethodFilter)) {
-          if (!options.paymentMethodFilter.includes(method)) return;
+          if (!options.paymentMethodFilter.some(f => f === method)) return;
         } else {
           if (method !== options.paymentMethodFilter) return;
         }
       }
 
-      // Apply currencyFilter
-      const currency = data["Currency"] || "USD";
+      // 2. Get Currency with fallbacks
+      const currency = data["Currency"] || data["currency"] || "USD";
       if (options?.currencyFilter) {
         if (currency !== options.currencyFilter) return;
       }
 
-      const dateStr = data[sanitizeKey("Date")] || data["Date"];
+      // 3. Get Date with fallbacks
+      const dateStr = data["Date"] || data["date"] || data["createdAt"];
       if (!dateStr) return;
 
       const date = dayjs(dateStr);
+      if (!date.isValid()) return;
+      
       const isFuture = date.isAfter(now, 'day');
 
-      let rawAmount = data[sanitizeKey("Amount")] || data["Amount"] || "0";
+      // 4. Get Amount with robust parsing
+      let rawAmount = data["Amount"] || data["amount"] || data["Amount_Income_Expense"] || data["Amount (Income/Expense)"] || 0;
       if (typeof rawAmount === "string") {
         rawAmount = rawAmount.replace(/,/g, ".");
       }
       const amount = Math.abs(parseFloat(rawAmount));
-      if (isNaN(amount) || amount === 0) return; // Skip invalid or zero amount records
+      if (isNaN(amount) || amount === 0) return;
 
-      const isIncome = data["Type"] === "Income";
-      const category = autoCategorize(data["Description"] || "", data["Category"]);
+      // 5. Get Type with fallbacks
+      const type = data["Type"] || data["type"] || "Expense";
+      const isIncome = type === "Income" || type === "income";
+      
+      const category = autoCategorize(data["Description"] || data["description"] || "", data["Category"] || data["category"]);
 
       // Calculate Carryover: If we have an anchor, add transactions from anchor month to before target month
       if (hasAnchor) {
@@ -111,13 +158,12 @@ export async function getClearPortStats(month?: number, year?: number, options?:
         const targetTime = targetYear * 12 + targetMonth;
 
         if (transTime >= anchorTime && transTime < targetTime) {
-          // IMPORTANT: Only add to startingBalance if it matches the current currency we are reporting on
           if (isIncome) startingBalance += amount;
           else startingBalance -= amount;
         }
       }
 
-      // Total balance (historical - includes everything that is not future and not inactive)
+      // Total balance logic (historical)
       if (!isFuture) {
         if (isIncome) totalBalance += amount;
         else totalBalance -= amount;
@@ -128,13 +174,13 @@ export async function getClearPortStats(month?: number, year?: number, options?:
         // Add to full transaction list for reports
         monthlyTransactionsList.push({
           id: doc.id,
-          date: dateStr,
-          description: data["Description"] || "No Description",
-          category: category,
-          amount: amount,
-          type: data["Type"],
-          paymentMethod: data[sanitizeKey("Payment Method")] || data["Payment Method"],
-          currency: currency,
+          Date: dateStr,
+          Description: data["Description"] || data["description"] || "No Description",
+          Category: category,
+          Amount: amount,
+          Type: isIncome ? "Income" : "Expense",
+          "Payment Method": method,
+          Currency: currency,
           isFuture
         });
 
@@ -142,7 +188,7 @@ export async function getClearPortStats(month?: number, year?: number, options?:
           monthlyIncomeWithFuture += amount;
           monthlyIncomeItems.push({
             date: dateStr,
-            description: data["Description"] || "No Description",
+            description: data["Description"] || data["description"] || "No Description",
             amount,
             isFuture
           });
@@ -179,7 +225,7 @@ export async function getClearPortStats(month?: number, year?: number, options?:
     
     // Sort income items by date
     monthlyIncomeItems.sort((a, b) => a.date.localeCompare(b.date));
-    monthlyTransactionsList.sort((a, b) => a.date.localeCompare(b.date));
+    monthlyTransactionsList.sort((a, b) => a.Date.localeCompare(b.Date));
 
     const topCategory = Object.entries(categoryTotals)
       .sort(([, a], [, b]) => b - a)[0]?.[0] || "None";

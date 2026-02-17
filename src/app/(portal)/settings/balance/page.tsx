@@ -38,12 +38,14 @@ import {
 import { cn } from "@/lib/NextAdmin/utils";
 import dayjs from 'dayjs';
 import { useToast } from '@/components/NextAdmin/ui/toast';
+import { BANKS, getBankName } from '@/utils/bankConstants';
 
 interface BalanceRecord {
   id: string;
   year: number;
   month: number;
   amount: number;
+  bankId: string;
 }
 
 export default function StartingBalancePage() {
@@ -58,7 +60,8 @@ export default function StartingBalancePage() {
   const [formData, setFormData] = useState({
     year: dayjs().year(),
     month: dayjs().month(),
-    amount: ''
+    amount: '',
+    bankId: 'chip-mong'
   });
 
   const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -72,10 +75,25 @@ export default function StartingBalancePage() {
         .filter(d => d.id.startsWith('balance_'))
         .map(d => {
           const parts = d.id.split('_');
+          // Format: balance_[bankId]_[YYYY]_[MM] or balance_[YYYY]_[MM]
+          let bankId = 'chip-mong';
+          let year, month;
+
+          if (parts.length === 4) {
+            bankId = parts[1];
+            year = parseInt(parts[2]);
+            month = parseInt(parts[3]);
+          } else {
+            // Legacy format
+            year = parseInt(parts[1]);
+            month = parseInt(parts[2]);
+          }
+
           return {
             id: d.id,
-            year: parseInt(parts[1]),
-            month: parseInt(parts[2]),
+            year,
+            month,
+            bankId,
             amount: d.data().amount || 0
           };
         })
@@ -97,7 +115,8 @@ export default function StartingBalancePage() {
     setFormData({ 
         year: dayjs().year(), 
         month: dayjs().month(), 
-        amount: '' 
+        amount: '',
+        bankId: 'chip-mong'
     });
     setDialogOpen(true);
   };
@@ -107,7 +126,8 @@ export default function StartingBalancePage() {
     setFormData({
       year: item.year,
       month: item.month,
-      amount: item.amount.toString()
+      amount: item.amount.toString(),
+      bankId: item.bankId
     });
     setDialogOpen(true);
   };
@@ -116,7 +136,7 @@ export default function StartingBalancePage() {
     if (!formData.amount) return;
     setSaving(true);
     try {
-      const docId = `balance_${formData.year}_${formData.month}`;
+      const docId = `balance_${formData.bankId}_${formData.year}_${formData.month}`;
       const amount = parseFloat(formData.amount);
 
       await setDoc(doc(db, 'settings', docId), {
@@ -150,7 +170,7 @@ export default function StartingBalancePage() {
       <Box className="flex flex-wrap items-center justify-between gap-4">
         <Box>
           <h1 className="text-heading-5 font-bold text-dark dark:text-white">Starting Balance Management</h1>
-          <p className="text-body-sm font-medium text-dark-5">Manage your initial bank balance for each month</p>
+          <p className="text-body-sm font-medium text-dark-5">Manage your initial bank balance for each month by bank</p>
         </Box>
         
         <Button
@@ -168,6 +188,7 @@ export default function StartingBalancePage() {
           <Table>
             <TableHeader>
               <TableRow className="border-none bg-[#F7F9FC] dark:bg-dark-2">
+                <TableHead className="px-6 py-4 font-bold">Bank</TableHead>
                 <TableHead className="px-6 py-4 font-bold">Month / Year</TableHead>
                 <TableHead className="px-6 py-4 font-bold text-right">Starting Balance</TableHead>
                 <TableHead className="px-6 py-4 font-bold text-right">Actions</TableHead>
@@ -175,13 +196,16 @@ export default function StartingBalancePage() {
             </TableHeader>
             <TableBody>
               {loading ? (
-                <TableRow><TableCell colSpan={3} className="text-center py-10"><CircularProgress size={24} /></TableCell></TableRow>
+                <TableRow><TableCell colSpan={4} className="text-center py-10"><CircularProgress size={24} /></TableCell></TableRow>
               ) : balances.length === 0 ? (
-                <TableRow><TableCell colSpan={3} className="text-center py-10 text-dark-5">No balance records configured.</TableCell></TableRow>
+                <TableRow><TableCell colSpan={4} className="text-center py-10 text-dark-5">No balance records configured.</TableCell></TableRow>
               ) : (
                 balances.map((item) => (
                   <TableRow key={item.id} className="hover:bg-gray-2/50 dark:hover:bg-dark-2/50 transition-colors">
                     <TableCell className="px-6 py-4 font-bold text-dark dark:text-white">
+                        {getBankName(item.bankId)}
+                    </TableCell>
+                    <TableCell className="px-6 py-4 text-dark-5">
                         {months[item.month]} {item.year}
                     </TableCell>
                     <TableCell className="px-6 py-4 font-black text-primary text-right text-lg">
@@ -246,6 +270,27 @@ export default function StartingBalancePage() {
         
         <DialogContent className="p-8 space-y-6 bg-gray-2/30 dark:bg-[#020D1A]/50">
           <div className="grid grid-cols-1 gap-6">
+            <div className="space-y-2">
+              <label className="text-[11px] font-bold uppercase tracking-wider text-dark-5 dark:text-dark-6 ml-1">
+                Select Bank
+              </label>
+              <TextField
+                select
+                fullWidth
+                value={formData.bankId}
+                onChange={(e) => setFormData({ ...formData, bankId: e.target.value })}
+                sx={{ 
+                  '& .MuiOutlinedInput-root': { 
+                    borderRadius: '16px',
+                    backgroundColor: 'var(--color-background)',
+                    '& fieldset': { borderColor: 'var(--color-stroke)' },
+                  }
+                }}
+              >
+                {BANKS.map(bank => <MenuItem key={bank.id} value={bank.id}>{bank.name}</MenuItem>)}
+              </TextField>
+            </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
               <div className="space-y-2">
                 <label className="text-[11px] font-bold uppercase tracking-wider text-dark-5 dark:text-dark-6 ml-1">

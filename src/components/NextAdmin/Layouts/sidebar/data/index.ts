@@ -36,12 +36,27 @@ export const NAV_DATA: NavSection[] = [
         icon: Icons.Alphabet,
         items: [
           {
-            title: "Daily Expense Report Bank",
-            url: "/daily-expense/bank",
+            title: "Daily Expense (Chip Mong)",
+            url: "/daily-expense/bank/chip-mong",
             icon: Icons.Table,
           },
           {
-            title: "Daily Expense Report Cash",
+            title: "Daily Expense (CIMB Bank)",
+            url: "/daily-expense/bank/cimb",
+            icon: Icons.Table,
+          },
+          {
+            title: "Daily Expense (ABA Bank)",
+            url: "/daily-expense/bank/aba",
+            icon: Icons.Table,
+          },
+          {
+            title: "Daily Expense (ACLEDA)",
+            url: "/daily-expense/bank/acleda",
+            icon: Icons.Table,
+          },
+          {
+            title: "Daily Expense (Cash)",
             url: "/daily-expense/cash",
             icon: Icons.Table,
           },
@@ -52,13 +67,28 @@ export const NAV_DATA: NavSection[] = [
         icon: Icons.PieChart,
         items: [
           {
-            title: "Monthly Report Bank",
-            url: "/reports/monthly",
+            title: "Report (Chip Mong)",
+            url: "/reports/monthly/bank/chip-mong",
             icon: Icons.Table,
           },
           {
-            title: "Monthly Report Cash",
-            url: "/reports/cash",
+            title: "Report (CIMB Bank)",
+            url: "/reports/monthly/bank/cimb",
+            icon: Icons.Table,
+          },
+          {
+            title: "Report (ABA Bank)",
+            url: "/reports/monthly/bank/aba",
+            icon: Icons.Table,
+          },
+          {
+            title: "Report (ACLEDA)",
+            url: "/reports/monthly/bank/acleda",
+            icon: Icons.Table,
+          },
+          {
+            title: "Report (Cash)",
+            url: "/reports/monthly/cash",
             icon: Icons.Table,
           },
         ],
@@ -83,7 +113,7 @@ export const NAV_DATA: NavSection[] = [
             icon: Icons.Calendar,
           },
           {
-            title: "Starting Balance Bank",
+            title: "Starting Balance Banks",
             url: "/settings/balance",
             icon: Icons.HomeIcon,
           },

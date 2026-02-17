@@ -20,23 +20,29 @@ import {
 import { useToast } from "@/components/NextAdmin/ui/toast";
 import { ConfirmationDialog } from "@/components/NextAdmin/ui/ConfirmationDialog";
 import { useConfirm } from "@/hooks/NextAdmin/useConfirm";
-
-const initialForm = columns.reduce((acc, col) => {
-  if (dateFields.includes(col)) {
-    acc[col] = dayjs().format("YYYY-MM-DD");
-  } else if (col === "Type") {
-    acc[col] = "Expense";
-  } else if (col === "Payment Method") {
-    acc[col] = "Chip Mong Bank";
-  } else if (col === "Currency") {
-    acc[col] = "USD";
-  } else {
-    acc[col] = "";
-  }
-  return acc;
-}, {} as Record<string, string>);
+import { useParams } from "next/navigation";
+import { getBankName } from "@/utils/bankConstants";
 
 export default function DailyExpenseBankPage() {
+  const params = useParams();
+  const bankId = params?.bankId as string;
+  const bankName = getBankName(bankId);
+
+  const initialForm = columns.reduce((acc, col) => {
+    if (dateFields.includes(col)) {
+      acc[col] = dayjs().format("YYYY-MM-DD");
+    } else if (col === "Type") {
+      acc[col] = "Expense";
+    } else if (col === "Payment Method") {
+      acc[col] = bankName;
+    } else if (col === "Currency") {
+      acc[col] = "USD";
+    } else {
+      acc[col] = "";
+    }
+    return acc;
+  }, {} as Record<string, string>);
+
   const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
   const {
     rows,
@@ -50,8 +56,9 @@ export default function DailyExpenseBankPage() {
     stats,
     uniqueDescriptions,
   } = useExpenseData({ 
-    paymentMethodFilter: ["ABA Bank", "ACLEDA Bank", "Chip Mong Bank", "From Chipmong bank to ACALEDA", "CIMB Bank"],
-    balanceType: 'bank'
+    paymentMethodFilter: [bankName],
+    balanceType: 'bank',
+    bankId: bankId
   });
   const { showToast } = useToast();
   const { confirm, isOpen: isConfirmOpen, options: confirmOptions, handleConfirm, handleCancel } = useConfirm();
@@ -222,10 +229,10 @@ export default function DailyExpenseBankPage() {
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <h1 className="text-heading-5 font-bold text-dark dark:text-white">
-              Daily Expense Report (Bank)
+              Daily Expense Report ({bankName})
             </h1>
             <p className="text-body-sm font-medium text-dark-5">
-              Manage and track daily bank expenses
+              Manage and track daily {bankName} expenses
             </p>
           </div>
 
@@ -380,6 +387,7 @@ export default function DailyExpenseBankPage() {
                 handleDeactivate={onDeactivate}
                 sendToTelegram={sendToTelegram}
                 setSendToTelegram={setSendToTelegram}
+                bankName={bankName}
               />
 
               <ExpenseDetail

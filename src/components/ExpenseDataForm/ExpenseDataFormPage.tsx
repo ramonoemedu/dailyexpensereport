@@ -14,6 +14,8 @@ import AddIcon from "@mui/icons-material/Add";
 import CloseIcon from '@mui/icons-material/Close';
 import InventoryIcon from '@mui/icons-material/Inventory';
 import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
+import FileDownloadIcon from '@mui/icons-material/FileDownload';
+import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 
 import { DatePicker } from "@mui/x-date-pickers/DatePicker";
 import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
@@ -25,6 +27,8 @@ import { ExpenseDataTable } from "./ExpenseDataTable";
 import { cn } from "@/lib/NextAdmin/utils";
 import { refineDescription, getSmartSuggestions, autoCategorize } from "@/utils/DescriptionHelper";
 import { exchangeRateService } from "@/utils/exchangeRateService";
+import { generateExcel } from "@/utils/excelGenerator";
+import { generatePdf } from "@/utils/pdfGenerator";
 
 type Props = {
   columns: string[];
@@ -46,6 +50,7 @@ type Props = {
   handleDeactivate: (id: string) => void;
   sendToTelegram?: boolean;
   setSendToTelegram?: (val: boolean) => void;
+  bankName?: string;
 };
 
 const FormField = ({
@@ -83,12 +88,40 @@ const ExpenseDataFormPage: React.FC<Props> = ({
   handleDeactivate,
   sendToTelegram,
   setSendToTelegram,
+  bankName = "Bank",
 }) => {
   const descriptionRef = React.useRef<HTMLInputElement>(null);
   const [showSuggestions, setShowSuggestions] = React.useState(false);
   const [suggestions, setSuggestions] = React.useState<string[]>([]);
   const [exchangeRate, setExchangeRate] = React.useState<number>(4100);
   const [khrAmount, setKhrAmount] = React.useState<string>("");
+  const [selectedIds, setSelectedIds] = React.useState<string[]>([]);
+
+  // Calculate totals for selection
+  const selectedTotal = React.useMemo(() => {
+    return rows
+      .filter(row => selectedIds.includes(row.id as string))
+      .reduce((acc, row) => {
+        const amount = Math.abs(parseFloat((row["Amount (Income/Expense)"] || row["Amount"] || 0).toString()));
+        return row.Type === "Income" ? acc + amount : acc - amount;
+      }, 0);
+  }, [rows, selectedIds]);
+
+  const handleExportExcel = async () => {
+    const dataToExport = selectedIds.length > 0 
+      ? rows.filter(r => selectedIds.includes(r.id as string))
+      : rows;
+    
+    await generateExcel("Daily Expense Report", columns, dataToExport, bankName);
+  };
+
+  const handleExportPdf = () => {
+    const dataToExport = selectedIds.length > 0 
+      ? rows.filter(r => selectedIds.includes(r.id as string))
+      : rows;
+
+    generatePdf("Daily Expense Report", columns, dataToExport, bankName);
+  };
 
   // Fetch exchange rate on dialog open
   React.useEffect(() => {
@@ -148,13 +181,79 @@ const ExpenseDataFormPage: React.FC<Props> = ({
   };
 
   return (
-    <div className="w-full">
+    <div className="w-full space-y-4">
+      {/* Selection Control Bar */}
+      {selectedIds.length > 0 && (
+        <div className="sticky top-0 z-20 flex animate-slide-down items-center justify-between rounded-2xl border border-primary/20 bg-primary/5 p-4 backdrop-blur-md dark:border-primary/30 dark:bg-primary/10">
+          <div className="flex items-center gap-6">
+            <div className="flex flex-col">
+              <span className="text-[10px] font-black uppercase tracking-widest text-primary/60">Selected Entries</span>
+              <span className="text-lg font-black text-primary">{selectedIds.length}</span>
+            </div>
+            <div className="h-10 w-px bg-primary/20" />
+            <div className="flex flex-col">
+              <span className="text-[10px] font-black uppercase tracking-widest text-primary/60">Selected Total</span>
+              <span className={cn(
+                "text-lg font-black",
+                selectedTotal >= 0 ? "text-success" : "text-danger"
+              )}>
+                {selectedTotal >= 0 ? "+" : ""}${Math.abs(selectedTotal).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleExportExcel}
+              className="flex items-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-bold text-primary shadow-sm transition-all hover:bg-gray-100 dark:bg-dark-2 dark:hover:bg-dark-3"
+            >
+              <FileDownloadIcon fontSize="small" />
+              Excel
+            </button>
+            <button
+              onClick={handleExportPdf}
+              className="flex items-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-bold text-primary shadow-sm transition-all hover:bg-gray-100 dark:bg-dark-2 dark:hover:bg-dark-3"
+            >
+              <PictureAsPdfIcon fontSize="small" />
+              PDF
+            </button>
+            <button
+              onClick={() => setSelectedIds([])}
+              className="ml-2 rounded-xl bg-primary px-4 py-2 text-sm font-bold text-white shadow-lg shadow-primary/25 transition-all hover:bg-opacity-90"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+      )}
+
+      {!selectedIds.length && (
+        <div className="flex justify-end gap-3 mb-2">
+            <button
+              onClick={handleExportExcel}
+              className="flex items-center gap-2 rounded-xl border border-stroke bg-white px-4 py-2 text-sm font-bold text-dark-4 transition-all hover:bg-gray-2 dark:border-dark-3 dark:bg-gray-dark dark:text-white dark:hover:bg-dark-2"
+            >
+              <FileDownloadIcon fontSize="small" />
+              Export Excel
+            </button>
+            <button
+              onClick={handleExportPdf}
+              className="flex items-center gap-2 rounded-xl border border-stroke bg-white px-4 py-2 text-sm font-bold text-dark-4 transition-all hover:bg-gray-2 dark:border-dark-3 dark:bg-gray-dark dark:text-white dark:hover:bg-dark-2"
+            >
+              <PictureAsPdfIcon fontSize="small" />
+              Export PDF
+            </button>
+        </div>
+      )}
+
       <ExpenseDataTable
         columns={columns}
         rows={rows}
         openEditDialog={openEditDialog}
         openDetailDialog={openDetailDialog}
         handleDeactivate={handleDeactivate}
+        selectedIds={selectedIds}
+        onSelectionChange={setSelectedIds}
       />
 
       <Tooltip title="Add Entry">

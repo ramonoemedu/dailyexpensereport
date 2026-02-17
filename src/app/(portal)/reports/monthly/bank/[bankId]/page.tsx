@@ -3,8 +3,10 @@
 import React, { useState, useEffect, useMemo } from "react";
 import dayjs from "dayjs";
 import { getClearPortStats } from "@/services/charts.services";
-import { Skeleton, Button } from "@mui/material";
+import { Skeleton, Checkbox } from "@mui/material";
 import PrintIcon from '@mui/icons-material/Print';
+import FileDownloadIcon from '@mui/icons-material/FileDownload';
+import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import {
   Table,
   TableBody,
@@ -14,12 +16,21 @@ import {
   TableRow
 } from "@/components/NextAdmin/ui/table";
 import { cn } from "@/lib/NextAdmin/utils";
+import { useParams } from "next/navigation";
+import { getBankName } from "@/utils/bankConstants";
+import { generateExcel } from "@/utils/excelGenerator";
+import { generatePdf } from "@/utils/pdfGenerator";
 
 export default function MonthlyReportPage() {
+  const params = useParams();
+  const bankId = params?.bankId as string;
+  const bankName = getBankName(bankId);
+
   const [stats, setStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [month, setMonth] = useState(dayjs().month());
   const [year, setYear] = useState(dayjs().year());
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   const months = useMemo(() => [
     "January", "February", "March", "April", "May", "June",
@@ -32,8 +43,9 @@ export default function MonthlyReportPage() {
       setLoading(true);
       try {
         const data = await getClearPortStats(month, year, {
-          paymentMethodFilter: ["ABA Bank", "ACLEDA Bank", "Chip Mong Bank", "From Chipmong bank to ACALEDA", "CIMB Bank"],
-          currencyFilter: "USD"
+          paymentMethodFilter: [bankName],
+          currencyFilter: "USD",
+          bankId: bankId
         });
         setStats(data);
       } catch (error) {
@@ -43,7 +55,48 @@ export default function MonthlyReportPage() {
       }
     }
     loadReport();
-  }, [month, year]);
+  }, [month, year, bankName]);
+
+  const selectedTotal = useMemo(() => {
+    if (!stats?.monthlyTransactionsList) return 0;
+    return stats.monthlyTransactionsList
+      .filter((item: any) => selectedIds.includes(item.id))
+      .reduce((acc: number, item: any) => {
+        return item.Type === "Income" ? acc + item.Amount : acc - item.Amount;
+      }, 0);
+  }, [stats, selectedIds]);
+
+  const handleExportExcel = async () => {
+    const dataToExport = selectedIds.length > 0 
+      ? stats.monthlyTransactionsList.filter((r: any) => selectedIds.includes(r.id))
+      : stats.monthlyTransactionsList;
+    
+    await generateExcel("Monthly Financial Report", ["Date", "Description", "Payment Method", "Category", "Type", "Currency", "Debit", "Credit"], dataToExport, bankName);
+  };
+
+  const handleExportPdf = () => {
+    const dataToExport = selectedIds.length > 0 
+      ? stats.monthlyTransactionsList.filter((r: any) => selectedIds.includes(r.id))
+      : stats.monthlyTransactionsList;
+
+    generatePdf("Monthly Financial Report", ["Date", "Description", "Payment Method", "Category", "Type", "Currency", "Debit", "Credit"], dataToExport, bankName);
+  };
+
+  const handleSelectAll = (checked: boolean) => {
+    if (checked && stats?.monthlyTransactionsList) {
+      setSelectedIds(stats.monthlyTransactionsList.map((item: any) => item.id));
+    } else {
+      setSelectedIds([]);
+    }
+  };
+
+  const handleSelectRow = (id: string, checked: boolean) => {
+    if (checked) {
+      setSelectedIds([...selectedIds, id]);
+    } else {
+      setSelectedIds(selectedIds.filter(sid => sid !== id));
+    }
+  };
 
   if (loading || !stats) {
     return (
@@ -74,14 +127,33 @@ export default function MonthlyReportPage() {
       <div className="flex flex-wrap items-end justify-between gap-6 print:hidden">
         <div>
           <h1 className="text-4xl font-black tracking-tight text-dark dark:text-white">
-            Statement <span className="text-primary opacity-50">#</span>{months[month].substring(0, 3).toUpperCase()}{year}
+            {bankName} Statement <span className="text-primary opacity-50">#</span>{months[month].substring(0, 3).toUpperCase()}{year}
           </h1>
           <p className="mt-2 text-base font-medium text-gray-500">
-            Comprehensive financial reconciliation for {months[month]}
+            Comprehensive financial reconciliation for {bankName} in {months[month]}
           </p>
         </div>
 
         <div className="flex items-center gap-3 bg-white/50 dark:bg-dark-2/50 backdrop-blur-md p-2 rounded-2xl border border-stroke dark:border-dark-3 shadow-sm">
+          {!selectedIds.length && (
+            <>
+              <button
+                onClick={handleExportExcel}
+                className="flex items-center gap-2 bg-gray-100 dark:bg-dark-3 text-dark dark:text-white px-3 py-2 rounded-xl text-xs font-bold hover:bg-gray-200 transition-all"
+              >
+                <FileDownloadIcon fontSize="inherit" />
+                Excel
+              </button>
+              <button
+                onClick={handleExportPdf}
+                className="flex items-center gap-2 bg-gray-100 dark:bg-dark-3 text-dark dark:text-white px-3 py-2 rounded-xl text-xs font-bold hover:bg-gray-200 transition-all"
+              >
+                <PictureAsPdfIcon fontSize="inherit" />
+                PDF
+              </button>
+              <div className="h-4 w-px bg-gray-300 dark:bg-gray-700" />
+            </>
+          )}
           <select
             value={month}
             onChange={(e) => setMonth(parseInt(e.target.value))}
@@ -159,11 +231,64 @@ export default function MonthlyReportPage() {
         </div>
 
         <div className="p-2 md:p-6">
+          {/* Selection Control Bar */}
+          {selectedIds.length > 0 && (
+            <div className="mb-6 flex animate-slide-down items-center justify-between rounded-2xl border border-primary/20 bg-white/80 p-4 shadow-sm dark:border-primary/30 dark:bg-dark-2/80 print:hidden">
+              <div className="flex items-center gap-6">
+                <div className="flex flex-col">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-primary/60">Selected Transactions</span>
+                  <span className="text-lg font-black text-primary">{selectedIds.length}</span>
+                </div>
+                <div className="h-10 w-px bg-primary/20" />
+                <div className="flex flex-col">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-primary/60">Selection Impact</span>
+                  <span className={cn(
+                    "text-lg font-black",
+                    selectedTotal >= 0 ? "text-success" : "text-danger"
+                  )}>
+                    {selectedTotal >= 0 ? "+" : ""}${Math.abs(selectedTotal).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={handleExportExcel}
+                  className="flex items-center gap-2 rounded-xl bg-primary/10 px-4 py-2 text-sm font-bold text-primary transition-all hover:bg-primary/20"
+                >
+                  <FileDownloadIcon fontSize="small" />
+                  Excel
+                </button>
+                <button
+                  onClick={handleExportPdf}
+                  className="flex items-center gap-2 rounded-xl bg-primary/10 px-4 py-2 text-sm font-bold text-primary transition-all hover:bg-primary/20"
+                >
+                  <PictureAsPdfIcon fontSize="small" />
+                  PDF
+                </button>
+                <button
+                  onClick={() => setSelectedIds([])}
+                  className="ml-2 rounded-xl bg-primary px-4 py-2 text-sm font-bold text-white shadow-lg shadow-primary/25 transition-all hover:bg-opacity-90"
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="overflow-hidden rounded-2xl border border-stroke dark:border-white/5">
             <Table>
               <TableHeader>
                 <TableRow className="bg-gray-50/50 dark:bg-white/5">
-                  <TableHead className="font-black text-[10px] uppercase tracking-widest px-6">Date</TableHead>
+                  <TableHead className="w-10 px-6">
+                    <Checkbox
+                      size="small"
+                      checked={stats.monthlyTransactionsList?.length > 0 && selectedIds.length === stats.monthlyTransactionsList?.length}
+                      indeterminate={selectedIds.length > 0 && selectedIds.length < stats.monthlyTransactionsList?.length}
+                      onChange={(e) => handleSelectAll(e.target.checked)}
+                    />
+                  </TableHead>
+                  <TableHead className="font-black text-[10px] uppercase tracking-widest">Date</TableHead>
                   <TableHead className="font-black text-[10px] uppercase tracking-widest">Details</TableHead>
                   <TableHead className="font-black text-[10px] uppercase tracking-widest text-right">Debit (+)</TableHead>
                   <TableHead className="font-black text-[10px] uppercase tracking-widest text-right">Credit (-)</TableHead>
@@ -173,7 +298,8 @@ export default function MonthlyReportPage() {
               <TableBody>
                 {/* Initial Row */}
                 <TableRow className="bg-blue-50/30 dark:bg-blue-500/5 font-bold">
-                  <TableCell className="px-6 py-4 text-xs opacity-60 italic">01-{month + 1}-{year}</TableCell>
+                  <TableCell className="px-6"></TableCell>
+                  <TableCell className="px-0 py-4 text-xs opacity-60 italic">01-{month + 1}-{year}</TableCell>
                   <TableCell className="text-xs tracking-tight uppercase">Opening Balance Carried Forward</TableCell>
                   <TableCell className="text-right text-success text-xs">+{formatValue(stats.startingBalance || 0)}</TableCell>
                   <TableCell className="text-right text-xs">-</TableCell>
@@ -183,20 +309,36 @@ export default function MonthlyReportPage() {
                 {(() => {
                   let runningBalance = stats.startingBalance || 0;
                   return stats.monthlyTransactionsList?.map((item: any, idx: number) => {
-                    const isIncome = item.type === "Income";
-                    isIncome ? runningBalance += item.amount : runningBalance -= item.amount;
+                    const isIncome = item.Type === "Income";
+                    isIncome ? runningBalance += item.Amount : runningBalance -= item.Amount;
+                    const isSelected = selectedIds.includes(item.id);
 
                     return (
-                      <TableRow key={idx} className={cn("hover:bg-gray-50/50 dark:hover:bg-white/5", item.isFuture && "opacity-40 grayscale italic")}>
-                        <TableCell className="px-6 text-xs text-gray-500">{dayjs(item.date).format('DD MMM')}</TableCell>
+                      <TableRow 
+                        key={idx} 
+                        className={cn(
+                          "hover:bg-gray-50/50 dark:hover:bg-white/5 transition-colors cursor-pointer", 
+                          isSelected ? "bg-primary/5 dark:bg-primary/10" : "",
+                          item.isFuture && "opacity-40 grayscale italic"
+                        )}
+                        onClick={() => handleSelectRow(item.id, !isSelected)}
+                      >
+                        <TableCell className="px-6" onClick={(e) => e.stopPropagation()}>
+                          <Checkbox
+                            size="small"
+                            checked={isSelected}
+                            onChange={(e) => handleSelectRow(item.id, e.target.checked)}
+                          />
+                        </TableCell>
+                        <TableCell className="px-0 text-xs text-gray-500">{dayjs(item.Date).format('DD MMM')}</TableCell>
                         <TableCell>
                           <div className="flex flex-col">
-                            <span className="text-xs font-bold">{item.description}</span>
-                            <span className="text-[9px] uppercase font-black text-gray-400">{item.category}</span>
+                            <span className="text-xs font-bold">{item.Description}</span>
+                            <span className="text-[9px] uppercase font-black text-gray-400">{item.Category}</span>
                           </div>
                         </TableCell>
-                        <TableCell className="text-right text-xs font-bold text-emerald-500">{isIncome ? `+${formatValue(item.amount, item.currency)}` : ""}</TableCell>
-                        <TableCell className="text-right text-xs font-bold text-rose-500">{!isIncome ? `-${formatValue(item.amount, item.currency)}` : ""}</TableCell>
+                        <TableCell className="text-right text-xs font-bold text-emerald-500">{isIncome ? `+${formatValue(item.Amount, item.Currency)}` : ""}</TableCell>
+                        <TableCell className="text-right text-xs font-bold text-rose-500">{!isIncome ? `-${formatValue(item.Amount, item.Currency)}` : ""}</TableCell>
                         <TableCell className="text-right px-6 text-xs font-black">{formatValue(runningBalance)}</TableCell>
                       </TableRow>
                     );
