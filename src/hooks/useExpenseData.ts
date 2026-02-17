@@ -20,7 +20,8 @@ import { sendTelegramNotification, formatExpenseMessage } from "@/utils/telegram
 export function useExpenseData(options?: { 
   paymentMethodFilter?: string | string[], 
   balanceType?: 'bank' | 'cash',
-  bankId?: string 
+  bankId?: string,
+  statusFilter?: 'all' | 'active' | 'inactive'
 }) {
   const [allRows, setAllRows] = useState<Record<string, any>[]>([]);
   const [loading, setLoading] = useState(false);
@@ -32,6 +33,7 @@ export function useExpenseData(options?: {
     typeFilter: "All",
     month: new Date().getMonth(),
     year: new Date().getFullYear(),
+    statusFilter: "active"
   });
 
   const fetchAllData = useCallback(async () => {
@@ -128,14 +130,33 @@ export function useExpenseData(options?: {
 
   const filteredRows = useMemo(() => {
     return allRows.filter((row) => {
+      // Apply statusFilter from options or filters state
+      const effectiveStatusFilter = options?.statusFilter || filters.statusFilter;
+      if (effectiveStatusFilter && effectiveStatusFilter !== 'all') {
+        if (effectiveStatusFilter === 'active' && row.status === 'inactive') return false;
+        if (effectiveStatusFilter === 'inactive' && row.status !== 'inactive') return false;
+      }
+      
       // Apply paymentMethodFilter if provided
       if (options?.paymentMethodFilter) {
-        const method = row["Payment Method"];
-        if (Array.isArray(options.paymentMethodFilter)) {
-          if (!options.paymentMethodFilter.includes(method)) return false;
-        } else {
-          if (method !== options.paymentMethodFilter) return false;
-        }
+        const method = row["Payment Method"] || row["Payment_Method"];
+        
+        // Normalize method name for comparison
+        const normalizedMethod = (method || "").toString().toLowerCase().trim();
+        
+        const filterArray = Array.isArray(options.paymentMethodFilter) 
+          ? options.paymentMethodFilter 
+          : [options.paymentMethodFilter];
+
+        // Map filters to include potential variants
+        const expandedFilters = filterArray.flatMap(f => {
+          const lowerF = f.toLowerCase();
+          if (lowerF.includes("chip mong")) return [lowerF, "from chipmong bank to acaleda", "chip mong bank"];
+          if (lowerF.includes("acleda")) return [lowerF, "acleda bank", "from chipmong bank to acaleda"];
+          return [lowerF];
+        });
+
+        if (!expandedFilters.some(f => normalizedMethod.includes(f) || f.includes(normalizedMethod))) return false;
       }
 
       if (filters.searchText) {
@@ -165,7 +186,7 @@ export function useExpenseData(options?: {
 
       return true;
     });
-  }, [allRows, filters]);
+  }, [allRows, filters, options?.paymentMethodFilter, options?.statusFilter]);
 
   const [page, setPage] = useState(1);
 
@@ -177,6 +198,7 @@ export function useExpenseData(options?: {
   const stats = useMemo(() => {
     const filterMonth = filters.month;
     const filterYear = filters.year;
+    const effectiveStatusFilter = options?.statusFilter || filters.statusFilter;
     
     const result = {
       weeklyIncome: 0,
@@ -213,16 +235,31 @@ export function useExpenseData(options?: {
     }
 
     allRows.forEach(row => {
-      if (row.status === 'inactive') return;
+      const status = row.status || 'active';
+
+      // Respect status filter for stats calculation
+      if (effectiveStatusFilter && effectiveStatusFilter !== 'all') {
+        if (effectiveStatusFilter === 'active' && status === 'inactive') return;
+        if (effectiveStatusFilter === 'inactive' && status !== 'inactive') return;
+      }
+      // If effectiveStatusFilter is 'all', we include both active and inactive.
 
       // Apply paymentMethodFilter to stats calculation
       if (options?.paymentMethodFilter) {
-        const method = row["Payment Method"];
-        if (Array.isArray(options.paymentMethodFilter)) {
-          if (!options.paymentMethodFilter.includes(method)) return;
-        } else {
-          if (method !== options.paymentMethodFilter) return;
-        }
+        const method = row["Payment Method"] || row["Payment_Method"];
+        const normalizedMethod = (method || "").toString().toLowerCase().trim();
+        const filterArray = Array.isArray(options.paymentMethodFilter) 
+          ? options.paymentMethodFilter 
+          : [options.paymentMethodFilter];
+
+        const expandedFilters = filterArray.flatMap(f => {
+          const lowerF = f.toLowerCase();
+          if (lowerF.includes("chip mong")) return [lowerF, "from chipmong bank to acaleda", "chip mong bank"];
+          if (lowerF.includes("acleda")) return [lowerF, "acleda bank", "from chipmong bank to acaleda"];
+          return [lowerF];
+        });
+
+        if (!expandedFilters.some(f => normalizedMethod.includes(f) || f.includes(normalizedMethod))) return;
       }
 
       const date = dayjs(row.Date);
@@ -279,13 +316,37 @@ export function useExpenseData(options?: {
     result.currentBalanceKHR = baseBalanceKHR + result.monthlyIncomeKHR - result.monthlyExpenseKHR;
 
     return result;
-  }, [allRows, filters.month, filters.year, balanceRecords, options?.paymentMethodFilter]);
+  }, [allRows, filters.month, filters.year, filters.statusFilter, balanceRecords, options?.paymentMethodFilter, options?.statusFilter]);
+
+  const filteredStats = useMemo(() => {
+    const result = {
+      totalDebit: 0,
+      totalCredit: 0,
+      totalDebitKHR: 0,
+      totalCreditKHR: 0
+    };
+
+    filteredRows.forEach(row => {
+      const amount = Math.abs(parseFloat(row["Amount (Income/Expense)"] || row["Amount"] || 0));
+      const isIncome = row.Type === 'Income';
+      const currency = row["Currency"] || "USD";
+
+      if (currency === "KHR") {
+        if (isIncome) result.totalDebitKHR += amount;
+        else result.totalCreditKHR += amount;
+      } else {
+        if (isIncome) result.totalDebit += amount;
+        else result.totalCredit += amount;
+      }
+    });
+
+    return result;
+  }, [filteredRows]);
 
   const paginatedRows = useMemo(() => {
     const start = (page - 1) * PAGE_SIZE;
-    // Also filter out inactive from table display
-    const visibleRows = filteredRows.filter(row => row.status !== 'inactive');
-    return visibleRows.slice(start, start + PAGE_SIZE);
+    // Don't filter inactive here - statusFilter is already applied in filteredRows
+    return filteredRows.slice(start, start + PAGE_SIZE);
   }, [filteredRows, page]);
 
   const fetchRows = useCallback(
@@ -383,14 +444,72 @@ export function useExpenseData(options?: {
         setSaving(false);
       }
     };
-  const deactivateEntry = async (id: string) => {
+  const deactivateEntry = async (id: string, sendNotification: boolean = true) => {
     try {
-      await updateDoc(doc(db, "expenses", id), { status: 'inactive' });
+      // Fetch record data first for notification
+      const recordRef = doc(db, "expenses", id);
+      const recordSnap = await getDoc(recordRef);
+      const recordData = recordSnap.exists() ? recordSnap.data() : null;
+
+      await updateDoc(recordRef, { status: 'inactive' });
+
+      // Send Telegram Notification if enabled
+      if (sendNotification && recordData) {
+        // Map Firestore keys back to UI keys for the notification
+        const mappedData: any = {};
+        for (const k of Object.keys(recordData)) {
+          mappedData[unsanitizeKey(k)] = recordData[k];
+        }
+        if (recordData.Amount !== undefined) mappedData.Amount = recordData.Amount;
+
+        const message = formatExpenseMessage(
+          'Deactivated',
+          mappedData,
+          stats
+        );
+        await sendTelegramNotification(message);
+      }
+
       // Re-fetch everything immediately to update the list
       await fetchAllData();
       return true;
     } catch (err) {
       console.error("Error deactivating entry:", err);
+      return false;
+    }
+  };
+
+  const activateEntry = async (id: string, sendNotification: boolean = true) => {
+    try {
+      // Fetch record data first for notification
+      const recordRef = doc(db, "expenses", id);
+      const recordSnap = await getDoc(recordRef);
+      const recordData = recordSnap.exists() ? recordSnap.data() : null;
+
+      await updateDoc(recordRef, { status: 'active' });
+
+      // Send Telegram Notification if enabled
+      if (sendNotification && recordData) {
+        // Map Firestore keys back to UI keys for the notification
+        const mappedData: any = {};
+        for (const k of Object.keys(recordData)) {
+          mappedData[unsanitizeKey(k)] = recordData[k];
+        }
+        if (recordData.Amount !== undefined) mappedData.Amount = recordData.Amount;
+
+        const message = formatExpenseMessage(
+          'Activated',
+          mappedData,
+          stats
+        );
+        await sendTelegramNotification(message);
+      }
+
+      // Re-fetch everything immediately to update the list
+      await fetchAllData();
+      return true;
+    } catch (err) {
+      console.error("Error activating entry:", err);
       return false;
     }
   };
@@ -403,13 +522,15 @@ export function useExpenseData(options?: {
     rows: paginatedRows,
     loading,
     saving,
-    totalRows: filteredRows.filter(r => r.status !== 'inactive').length,
+    totalRows: filteredRows.length,
     fetchRows,
     dropdownOptions,
     saveEntry,
     deactivateEntry,
+    activateEntry,
     refreshCount: fetchAllData,
     stats,
+    filteredStats,
     uniqueDescriptions,
   };
 }

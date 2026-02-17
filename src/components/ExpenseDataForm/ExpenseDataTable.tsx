@@ -13,6 +13,7 @@ import { IconButton, Tooltip, Checkbox } from "@mui/material";
 import EditIcon from "@mui/icons-material/Edit";
 import VisibilityIcon from "@mui/icons-material/Visibility";
 import DeleteIcon from "@mui/icons-material/Delete";
+import RestoreFromTrashIcon from '@mui/icons-material/RestoreFromTrash';
 import { dateFields, formatDisplayDate } from "@/utils/KeySanitizer";
 import { cn } from "@/lib/NextAdmin/utils";
 import dayjs from "dayjs";
@@ -23,6 +24,7 @@ type Props = {
   openEditDialog: (row: any, idx: number) => void;
   openDetailDialog: (row: any) => void;
   handleDeactivate: (id: string) => void;
+  handleActivate?: (id: string) => void;
   selectedIds?: string[];
   onSelectionChange?: (ids: string[]) => void;
 };
@@ -42,6 +44,7 @@ export function ExpenseDataTable({
   openEditDialog,
   openDetailDialog,
   handleDeactivate,
+  handleActivate,
   selectedIds = [],
   onSelectionChange,
 }: Props) {
@@ -198,15 +201,27 @@ export function ExpenseDataTable({
                           <EditIcon fontSize="small" />
                         </IconButton>
                       </Tooltip>
-                      <Tooltip title="Deactivate">
-                        <IconButton
-                          onClick={() => handleDeactivate(row.id as string)}
-                          size="small"
-                          className="text-dark-4 hover:text-danger transition-colors"
-                        >
-                          <DeleteIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
+                      {row.status === 'inactive' ? (
+                        <Tooltip title="Restore/Activate">
+                          <IconButton
+                            onClick={() => handleActivate && handleActivate(row.id as string)}
+                            size="small"
+                            className="text-dark-4 hover:text-success transition-colors"
+                          >
+                            <RestoreFromTrashIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      ) : (
+                        <Tooltip title="Deactivate">
+                          <IconButton
+                            onClick={() => handleDeactivate(row.id as string)}
+                            size="small"
+                            className="text-dark-4 hover:text-danger transition-colors"
+                          >
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>

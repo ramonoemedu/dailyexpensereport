@@ -18,6 +18,14 @@ import {
 import { cn } from "@/lib/NextAdmin/utils";
 import { generateExcel } from "@/utils/excelGenerator";
 import { generatePdf } from "@/utils/pdfGenerator";
+import { OverviewCard } from "@/components/NextAdmin/Dashboard/overview-cards/card";
+import {
+  Views as IncomeIcon,
+  Profit as ExpenseIcon,
+  Product as BalanceIcon
+} from "@/components/NextAdmin/Dashboard/overview-cards/icons";
+import { DatePicker, LocalizationProvider } from "@mui/x-date-pickers";
+import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
 
 export default function MonthlyReportCashPage() {
   const [stats, setStats] = useState<any>(null);
@@ -26,6 +34,8 @@ export default function MonthlyReportCashPage() {
   const [year, setYear] = useState(dayjs().year());
   const [currency, setCurrency] = useState("USD");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('active');
+  const [dateFilter, setDateFilter] = useState<string | null>(null);
 
   const months = useMemo(() => [
     "January", "February", "March", "April", "May", "June",
@@ -39,7 +49,8 @@ export default function MonthlyReportCashPage() {
       try {
         const data = await getClearPortStats(month, year, {
           paymentMethodFilter: "Cash",
-          currencyFilter: currency
+          currencyFilter: currency,
+          statusFilter: statusFilter
         });
         setStats(data);
       } catch (error) {
@@ -49,32 +60,49 @@ export default function MonthlyReportCashPage() {
       }
     }
     loadReport();
-  }, [month, year, currency]);
+  }, [month, year, currency, statusFilter]);
 
-    const selectedTotal = useMemo(() => {
-      if (!stats?.monthlyTransactionsList) return 0;
-      return stats.monthlyTransactionsList
-        .filter((item: any) => selectedIds.includes(item.id))
-        .reduce((acc: number, item: any) => {
-          return item.Type === "Income" ? acc + item.Amount : acc - item.Amount;
-        }, 0);
-    }, [stats, selectedIds]);
-  
-    const handleExportExcel = async () => {
-      const dataToExport = selectedIds.length > 0 
-        ? stats.monthlyTransactionsList.filter((r: any) => selectedIds.includes(r.id))
-        : stats.monthlyTransactionsList;
-      
-      await generateExcel("Cash Financial Report", ["Date", "Description", "Payment Method", "Category", "Type", "Currency", "Debit", "Credit"], dataToExport, "Cash");
-    };
-  
-    const handleExportPdf = () => {
-      const dataToExport = selectedIds.length > 0 
-        ? stats.monthlyTransactionsList.filter((r: any) => selectedIds.includes(r.id))
-        : stats.monthlyTransactionsList;
-  
-      generatePdf("Cash Financial Report", ["Date", "Description", "Payment Method", "Category", "Type", "Currency", "Debit", "Credit"], dataToExport, "Cash");
-    };
+  const filteredTransactions = useMemo(() => {
+    if (!stats?.monthlyTransactionsList) return [];
+    return stats.monthlyTransactionsList.filter((item: any) => {
+      if (dateFilter && item.Date !== dateFilter) return false;
+      return true;
+    });
+  }, [stats, dateFilter]);
+
+  const dailyStats = useMemo(() => {
+    const result = { debit: 0, credit: 0 };
+    filteredTransactions.forEach((item: any) => {
+      if (item.Type === "Income") result.debit += item.Amount;
+      else result.credit += item.Amount;
+    });
+    return result;
+  }, [filteredTransactions]);
+
+  const selectedTotal = useMemo(() => {
+    if (!stats?.monthlyTransactionsList) return 0;
+    return stats.monthlyTransactionsList
+      .filter((item: any) => selectedIds.includes(item.id))
+      .reduce((acc: number, item: any) => {
+        return item.Type === "Income" ? acc + item.Amount : acc - item.Amount;
+      }, 0);
+  }, [stats, selectedIds]);
+
+  const handleExportExcel = async () => {
+    const dataToExport = selectedIds.length > 0 
+      ? stats.monthlyTransactionsList.filter((r: any) => selectedIds.includes(r.id))
+      : filteredTransactions;
+    
+    await generateExcel("Cash Financial Report", ["Date", "Description", "Payment Method", "Category", "Type", "Currency", "Debit", "Credit"], dataToExport, "Cash");
+  };
+
+  const handleExportPdf = () => {
+    const dataToExport = selectedIds.length > 0 
+      ? stats.monthlyTransactionsList.filter((r: any) => selectedIds.includes(r.id))
+      : filteredTransactions;
+
+    generatePdf("Cash Financial Report", ["Date", "Description", "Payment Method", "Category", "Type", "Currency", "Debit", "Credit"], dataToExport, "Cash");
+  };
   const handleSelectAll = (checked: boolean) => {
     if (checked && stats?.monthlyTransactionsList) {
       setSelectedIds(stats.monthlyTransactionsList.map((item: any) => item.id));
@@ -144,6 +172,16 @@ export default function MonthlyReportCashPage() {
             </>
           )}
           <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as 'all' | 'active' | 'inactive')}
+            className="bg-transparent px-3 py-2 text-sm font-bold outline-none cursor-pointer text-success"
+          >
+            <option value="all">All Status</option>
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+          </select>
+          <div className="h-4 w-px bg-gray-300 dark:bg-gray-700" />
+          <select
             value={currency}
             onChange={(e) => setCurrency(e.target.value)}
             className="bg-transparent px-3 py-2 text-sm font-bold outline-none cursor-pointer text-success"
@@ -209,23 +247,65 @@ export default function MonthlyReportCashPage() {
         </div>
 
         {/* Closing Balance */}
-        <div className="group relative overflow-hidden rounded-[32px] bg-slate-900 p-8 text-white shadow-xl transition-transform hover:scale-[1.02] dark:bg-white dark:text-dark">
-          <div className="relative z-10">
-            <p className="text-xs font-black uppercase tracking-[0.2em] opacity-70">Final Cash Position</p>
-            <h3 className="mt-3 text-4xl font-black">
-              {symbol}{currentCashBalance.toLocaleString(undefined, { minimumFractionDigits: fractionDigits })}
-            </h3>
-            <p className="mt-6 text-[11px] font-bold opacity-60">VERIFIED CASH ON HAND ({currency})</p>
-          </div>
-          <div className="absolute -right-6 -bottom-6 h-32 w-32 rounded-full bg-success/20 blur-3xl" />
+          <OverviewCard
+            label="Final Cash Position"
+            data={{
+              value: `${symbol}${currentCashBalance.toLocaleString(undefined, { minimumFractionDigits: fractionDigits })}`,
+              growthRate: 0
+            }}
+            Icon={BalanceIcon}
+            gradient="dark"
+          />
         </div>
-      </div>
+
+        {dateFilter && (
+          <div className="grid gap-4 sm:grid-cols-2 animate-fade-in">
+            <OverviewCard
+              label={`Total Debit (${dayjs(dateFilter).format('DD MMM')})`}
+              data={{ 
+                value: `${symbol}${dailyStats.debit.toLocaleString(undefined, { minimumFractionDigits: fractionDigits })}`, 
+                growthRate: 0 
+              }}
+              Icon={IncomeIcon}
+              gradient="green"
+            />
+            <OverviewCard
+              label={`Total Credit (${dayjs(dateFilter).format('DD MMM')})`}
+              data={{ 
+                value: `${symbol}${dailyStats.credit.toLocaleString(undefined, { minimumFractionDigits: fractionDigits })}`, 
+                growthRate: 0 
+              }}
+              Icon={ExpenseIcon}
+              gradient="red"
+            />
+          </div>
+        )}
 
       {/* --- Main Report Section --- */}
       <div className="overflow-hidden rounded-[32px] border border-stroke bg-white/50 backdrop-blur-md shadow-2xl dark:border-white/5 dark:bg-dark-2/50">
         <div className="p-8 border-b border-stroke dark:border-white/5 flex items-center justify-between">
           <h3 className="text-xl font-black">Cash Transaction Ledger ({currency})</h3>
-          <span className="text-[10px] font-bold bg-success/10 text-success px-3 py-1 rounded-full uppercase">Verified Cash Report</span>
+          <div className="flex items-center gap-4">
+            <LocalizationProvider dateAdapter={AdapterDayjs}>
+              <DatePicker
+                label="Filter by Date"
+                value={dateFilter ? dayjs(dateFilter) : null}
+                onChange={(d) => setDateFilter(d ? d.format("YYYY-MM-DD") : null)}
+                slotProps={{
+                  textField: { size: "small", sx: { width: 200 } },
+                }}
+              />
+            </LocalizationProvider>
+            {dateFilter && (
+              <button 
+                onClick={() => setDateFilter(null)}
+                className="text-xs font-bold text-danger hover:underline"
+              >
+                Clear Date
+              </button>
+            )}
+            <span className="text-[10px] font-bold bg-success/10 text-success px-3 py-1 rounded-full uppercase ml-4">Verified Cash Report</span>
+          </div>
         </div>
 
         <div className="p-2 md:p-6">
@@ -279,8 +359,8 @@ export default function MonthlyReportCashPage() {
                 <TableHead className="w-10 px-6">
                   <Checkbox
                     size="small"
-                    checked={stats.monthlyTransactionsList?.length > 0 && selectedIds.length === stats.monthlyTransactionsList?.length}
-                    indeterminate={selectedIds.length > 0 && selectedIds.length < stats.monthlyTransactionsList?.length}
+                    checked={filteredTransactions.length > 0 && selectedIds.length === filteredTransactions.length}
+                    indeterminate={selectedIds.length > 0 && selectedIds.length < filteredTransactions.length}
                     onChange={(e) => handleSelectAll(e.target.checked)}
                   />
                 </TableHead>
@@ -292,21 +372,29 @@ export default function MonthlyReportCashPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {/* Initial Row */}
-              <TableRow className="bg-emerald-50/30 dark:bg-emerald-500/5 font-bold">
-                <TableCell className="px-6"></TableCell>
-                <TableCell className="px-0 py-4 text-xs opacity-60 italic">01-{month + 1}-{year}</TableCell>
-                <TableCell className="text-xs tracking-tight uppercase">Opening Cash Carried Forward</TableCell>
-                <TableCell className="text-right text-success text-xs">+{symbol}{(stats.startingBalance || 0).toLocaleString(undefined, { minimumFractionDigits: fractionDigits })}</TableCell>
-                <TableCell className="text-right text-xs">-</TableCell>
-                <TableCell className="text-right px-6 font-black text-sm">{symbol}{(stats.startingBalance || 0).toLocaleString(undefined, { minimumFractionDigits: fractionDigits })}</TableCell>
-              </TableRow>
+              {/* Initial Row - Only show if not filtering by date or if filtered date is the 1st */}
+              {(!dateFilter || dayjs(dateFilter).date() === 1) && (
+                <TableRow className="bg-emerald-50/30 dark:bg-emerald-500/5 font-bold">
+                  <TableCell className="px-6"></TableCell>
+                  <TableCell className="px-0 py-4 text-xs opacity-60 italic">01-{month + 1}-{year}</TableCell>
+                  <TableCell className="text-xs tracking-tight uppercase">Opening Cash Carried Forward</TableCell>
+                  <TableCell className="text-right text-success text-xs">+{symbol}{(stats.startingBalance || 0).toLocaleString(undefined, { minimumFractionDigits: fractionDigits })}</TableCell>
+                  <TableCell className="text-right text-xs">-</TableCell>
+                  <TableCell className="text-right px-6 font-black text-sm">{symbol}{(stats.startingBalance || 0).toLocaleString(undefined, { minimumFractionDigits: fractionDigits })}</TableCell>
+                </TableRow>
+              )}
 
                               {(() => {
                                 let runningBalance = stats.startingBalance || 0;
+                                // If we filter by date, the running balance should ideally start from the balance *before* that date.
+                                // For simplicity, we'll show the monthly running balance logic but only display filtered rows.
+                                
                                 return stats.monthlyTransactionsList?.map((item: any, idx: number) => {
                                   const isIncome = item.Type === "Income";
                                   isIncome ? runningBalance += item.Amount : runningBalance -= item.Amount;
+                                  
+                                  if (dateFilter && item.Date !== dateFilter) return null;
+                                  
                                   const isSelected = selectedIds.includes(item.id);
               
                                   return (
@@ -339,7 +427,8 @@ export default function MonthlyReportCashPage() {
                                     </TableRow>
                                   );
                                 });
-                              })()}            </TableBody>
+                              })()}
+            </TableBody>
           </Table>
         </div>
 

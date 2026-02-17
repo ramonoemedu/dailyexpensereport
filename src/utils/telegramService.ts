@@ -44,12 +44,12 @@ export async function sendTelegramNotification(message: string, isError: boolean
 }
 
 export function formatExpenseMessage(
-  action: 'Created' | 'Updated' | 'Error',
+  action: 'Created' | 'Updated' | 'Deactivated' | 'Activated' | 'Error',
   data: any,
   stats: { monthlyIncome: number; monthlyExpense: number },
   error?: string
 ) {
-  const emoji = action === 'Created' ? '📝' : action === 'Updated' ? '✏️' : '⚠️';
+  const emoji = action === 'Created' ? '📝' : action === 'Updated' ? '✏️' : action === 'Deactivated' ? '🗑️' : action === 'Activated' ? '✅' : '⚠️';
   const typeEmoji = data.Type === 'Income' ? '💰' : '💸';
   
   let message = `<b>${emoji} Expense Report ${action}</b>
@@ -62,11 +62,11 @@ export function formatExpenseMessage(
   } else {
     message += `${typeEmoji} <b>Type:</b> ${data.Type}
 `;
-    message += `📅 <b>Date:</b> ${data.Date}
+    message += `📅 <b>Date:</b> ${data.Date || 'N/A'}
 `;
-    message += `💬 <b>Description:</b> ${data.Description}
+    message += `💬 <b>Description:</b> ${data.Description || 'N/A'}
 `;
-    message += `💵 <b>Amount:</b> $${parseFloat(data.Amount).toLocaleString()}
+    message += `💵 <b>Amount:</b> $${parseFloat(data.Amount || 0).toLocaleString()}
 `;
     message += `💳 <b>Method:</b> ${data["Payment Method"] || 'N/A'}
 `;

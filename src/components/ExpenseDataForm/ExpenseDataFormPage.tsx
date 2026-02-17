@@ -48,6 +48,7 @@ type Props = {
   openDetailDialog: (row: any) => void;
   uniqueDescriptions?: string[];
   handleDeactivate: (id: string) => void;
+  handleActivate?: (id: string) => void;
   sendToTelegram?: boolean;
   setSendToTelegram?: (val: boolean) => void;
   bankName?: string;
@@ -86,6 +87,7 @@ const ExpenseDataFormPage: React.FC<Props> = ({
   saving,
   uniqueDescriptions = [],
   handleDeactivate,
+  handleActivate,
   sendToTelegram,
   setSendToTelegram,
   bankName = "Bank",
@@ -252,6 +254,7 @@ const ExpenseDataFormPage: React.FC<Props> = ({
         openEditDialog={openEditDialog}
         openDetailDialog={openDetailDialog}
         handleDeactivate={handleDeactivate}
+        handleActivate={handleActivate}
         selectedIds={selectedIds}
         onSelectionChange={setSelectedIds}
       />
@@ -327,15 +330,21 @@ const ExpenseDataFormPage: React.FC<Props> = ({
                 </div>
                 <div className="grid grid-cols-1 gap-x-6 gap-y-5 sm:grid-cols-2">
                   {columns.map((col) => {
-                    if (col === "Credit" || col === "Date" || col === "Category" || col === "Currency") return null;
+                    if (col === "Credit" || col === "Date" || col === "Currency") return null;
 
                     const isDebit = col === "Debit";
                     const isDescription = col === "Description";
+                    const isCategory = col === "Category";
                     const currentCurrency = form["Currency"] || "USD";
                     const label = isDebit ? `Amount (${currentCurrency})` : (col === "Type" ? "Expense Type" : col);
                     const valueKey = isDebit ? "Amount (Income/Expense)" : col;
 
                     let options = dropdownOptions[col];
+                    if (isCategory) {
+                      // Show specific categories based on Type (Income/Expense)
+                      const isIncome = form["Type"] === "Income";
+                      options = dropdownOptions[isIncome ? "incomeCategories" : "expenseCategories"] || dropdownOptions["Category"];
+                    }
 
                     const handleKhrHelperChange = (val: string) => {
                       const numericVal = val.replace(/[^0-9]/g, '');

@@ -20,14 +20,13 @@ import {
 import { useToast } from "@/components/NextAdmin/ui/toast";
 import { ConfirmationDialog } from "@/components/NextAdmin/ui/ConfirmationDialog";
 import { useConfirm } from "@/hooks/NextAdmin/useConfirm";
+import { BANKS } from "@/utils/bankConstants";
 
 const initialForm = columns.reduce((acc, col) => {
   if (dateFields.includes(col)) {
     acc[col] = dayjs().format("YYYY-MM-DD");
   } else if (col === "Type") {
     acc[col] = "Expense";
-  } else if (col === "Payment Method") {
-    acc[col] = "Cash";
   } else if (col === "Currency") {
     acc[col] = "USD";
   } else {
@@ -36,7 +35,12 @@ const initialForm = columns.reduce((acc, col) => {
   return acc;
 }, {} as Record<string, string>);
 
-export default function DailyExpenseCashPage() {
+export default function DailyExpenseAllBanksPage() {
+  const bankName = "All Banks"; // Title for this page
+
+  // Moved statusFilter declaration here
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('active');
+
   const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
   const {
     rows,
@@ -52,26 +56,30 @@ export default function DailyExpenseCashPage() {
     filteredStats,
     uniqueDescriptions,
   } = useExpenseData({
-    paymentMethodFilter: "Cash",
-    balanceType: 'cash'
+    paymentMethodFilter: BANKS.map(bank => bank.name), // Filter for all bank names
+    balanceType: 'bank',
+    statusFilter: statusFilter // Pass the statusFilter here
   });
   const { showToast } = useToast();
   const { confirm, isOpen: isConfirmOpen, options: confirmOptions, handleConfirm, handleCancel } = useConfirm();
 
+  // Re-introduced state declarations
   const [form, setForm] = useState<Record<string, string>>(initialForm);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editIndex, setEditIndex] = useState<number | null>(null);
-  const [page, setPage] = useState(1);
-  const [searchText, setSearchText] = useState("");
-  const [date, setDate] = useState<string | null>(null);
-  const [typeFilter, setTypeFilter] = useState<string>("All");
-  const [month, setMonth] = useState(new Date().getMonth());
-  const [year, setYear] = useState(new Date().getFullYear());
   const [sendToTelegram, setSendToTelegram] = useState(true);
-  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('active');
 
   const [detailId, setDetailId] = useState<string | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [searchText, setSearchText] = useState("");
+  const [date, setDate] = useState<string | null>(null);
+  const [typeFilter, setTypeFilter] = useState("All");
+  const [month, setMonth] = useState(new Date().getMonth());
+  const [year, setYear] = useState(new Date().getFullYear());
+  const [page, setPage] = useState(1);
+  // ... existing state
+
+  // --- ADD THESE LINES ---
 
   const openDetailDialog = (row: any) => {
     if (!row || !row.id) return;
@@ -91,11 +99,11 @@ export default function DailyExpenseCashPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [searchText, date, typeFilter, month, year, statusFilter]);
+  }, [searchText, date, typeFilter, month, year, statusFilter]); // Added statusFilter to dependencies
 
   useEffect(() => {
-    fetchRows(page, { searchText, date, typeFilter, month, year, statusFilter });
-  }, [page, fetchRows, searchText, date, typeFilter, month, year, statusFilter]);
+    fetchRows(page, { searchText, date, typeFilter, month, year, statusFilter }); // Pass statusFilter
+  }, [page, fetchRows, searchText, date, typeFilter, month, year, statusFilter]); // Added statusFilter to dependencies
 
   const openAddDialog = () => {
     setForm(initialForm);
@@ -243,10 +251,10 @@ export default function DailyExpenseCashPage() {
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <h1 className="text-heading-5 font-bold text-dark dark:text-white">
-              Daily Expense Report (Cash)
+              Daily Expense Report ({bankName})
             </h1>
             <p className="text-body-sm font-medium text-dark-5">
-              Manage and track daily cash expenses
+              Manage and track daily {bankName} expenses
             </p>
           </div>
 
@@ -263,46 +271,31 @@ export default function DailyExpenseCashPage() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
           <OverviewCard
             label="Initial Carryover"
-            data={{
-              value: `$${stats.startingBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })} / ៛${stats.startingBalanceKHR.toLocaleString(undefined, { minimumFractionDigits: 0 })}`,
-              growthRate: 0
-            }}
+            data={{ value: `$${stats.startingBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, growthRate: 0 }}
             Icon={BalanceIcon}
             gradient="blue"
           />
           <OverviewCard
             label={`${months[month]} Income`}
-            data={{
-              value: `$${stats.monthlyIncome.toLocaleString(undefined, { minimumFractionDigits: 2 })} / ៛${stats.monthlyIncomeKHR.toLocaleString(undefined, { minimumFractionDigits: 0 })}`,
-              growthRate: 0
-            }}
+            data={{ value: `$${stats.monthlyIncome.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, growthRate: 0 }}
             Icon={IncomeIcon}
             gradient="green"
           />
           <OverviewCard
             label={`${months[month]} Expense`}
-            data={{
-              value: `$${stats.monthlyExpense.toLocaleString(undefined, { minimumFractionDigits: 2 })} / ៛${stats.monthlyExpenseKHR.toLocaleString(undefined, { minimumFractionDigits: 0 })}`,
-              growthRate: 0
-            }}
+            data={{ value: `$${stats.monthlyExpense.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, growthRate: 0 }}
             Icon={ExpenseIcon}
             gradient="red"
           />
           <OverviewCard
             label="Monthly Profit/Loss"
-            data={{
-              value: `$${(stats.monthlyIncome - stats.monthlyExpense).toLocaleString(undefined, { minimumFractionDigits: 2 })} / ៛${(stats.monthlyIncomeKHR - stats.monthlyExpenseKHR).toLocaleString(undefined, { minimumFractionDigits: 0 })}`,
-              growthRate: 0
-            }}
+            data={{ value: `${(stats.monthlyIncome - stats.monthlyExpense) >= 0 ? '+' : ''}$${(stats.monthlyIncome - stats.monthlyExpense).toLocaleString(undefined, { minimumFractionDigits: 2 })}`, growthRate: 0 }}
             Icon={BalanceIcon}
             gradient="purple"
           />
           <OverviewCard
             label="Total Balance"
-            data={{
-              value: `$${stats.currentBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })} / ៛${stats.currentBalanceKHR.toLocaleString(undefined, { minimumFractionDigits: 0 })}`,
-              growthRate: 0
-            }}
+            data={{ value: `$${stats.currentBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, growthRate: 0 }}
             Icon={BalanceIcon}
             gradient="dark"
           />
@@ -312,19 +305,13 @@ export default function DailyExpenseCashPage() {
           <div className="grid gap-4 sm:grid-cols-2 animate-fade-in">
             <OverviewCard
               label={`Total Debit (${dayjs(date).format('DD MMM')})`}
-              data={{ 
-                value: `$${filteredStats.totalDebit.toLocaleString(undefined, { minimumFractionDigits: 2 })} / ៛${filteredStats.totalDebitKHR.toLocaleString(undefined, { minimumFractionDigits: 0 })}`, 
-                growthRate: 0 
-              }}
+              data={{ value: `$${filteredStats.totalDebit.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, growthRate: 0 }}
               Icon={IncomeIcon}
               gradient="green"
             />
             <OverviewCard
               label={`Total Credit (${dayjs(date).format('DD MMM')})`}
-              data={{ 
-                value: `$${filteredStats.totalCredit.toLocaleString(undefined, { minimumFractionDigits: 2 })} / ៛${filteredStats.totalCreditKHR.toLocaleString(undefined, { minimumFractionDigits: 0 })}`, 
-                growthRate: 0 
-              }}
+              data={{ value: `$${filteredStats.totalCredit.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, growthRate: 0 }}
               Icon={ExpenseIcon}
               gradient="red"
             />
@@ -450,6 +437,7 @@ export default function DailyExpenseCashPage() {
                 handleActivate={onActivate}
                 sendToTelegram={sendToTelegram}
                 setSendToTelegram={setSendToTelegram}
+                bankName={bankName}
               />
 
               <ExpenseDetail

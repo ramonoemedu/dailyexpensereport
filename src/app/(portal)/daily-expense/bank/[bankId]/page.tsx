@@ -12,10 +12,10 @@ import { Skeleton } from "@mui/material";
 import { SearchIcon } from "@/assets/icons";
 import { useExpenseData } from "@/hooks/useExpenseData";
 import { OverviewCard } from "@/components/NextAdmin/Dashboard/overview-cards/card";
-import { 
-  Views as IncomeIcon, 
-  Profit as ExpenseIcon, 
-  Product as BalanceIcon 
+import {
+  Views as IncomeIcon,
+  Profit as ExpenseIcon,
+  Product as BalanceIcon
 } from "@/components/NextAdmin/Dashboard/overview-cards/icons";
 import { useToast } from "@/components/NextAdmin/ui/toast";
 import { ConfirmationDialog } from "@/components/NextAdmin/ui/ConfirmationDialog";
@@ -53,9 +53,11 @@ export default function DailyExpenseBankPage() {
     dropdownOptions,
     saveEntry,
     deactivateEntry,
+    activateEntry,
     stats,
+    filteredStats,
     uniqueDescriptions,
-  } = useExpenseData({ 
+  } = useExpenseData({
     paymentMethodFilter: [bankName],
     balanceType: 'bank',
     bankId: bankId
@@ -73,6 +75,7 @@ export default function DailyExpenseBankPage() {
   const [month, setMonth] = useState(new Date().getMonth());
   const [year, setYear] = useState(new Date().getFullYear());
   const [sendToTelegram, setSendToTelegram] = useState(true);
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('active');
 
   const [detailId, setDetailId] = useState<string | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
@@ -95,11 +98,11 @@ export default function DailyExpenseBankPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [searchText, date, typeFilter, month, year]);
+  }, [searchText, date, typeFilter, month, year, statusFilter]);
 
   useEffect(() => {
-    fetchRows(page, { searchText, date, typeFilter, month, year });
-  }, [page, fetchRows, searchText, date, typeFilter, month, year]);
+    fetchRows(page, { searchText, date, typeFilter, month, year, statusFilter });
+  }, [page, fetchRows, searchText, date, typeFilter, month, year, statusFilter]);
 
   const openAddDialog = () => {
     setForm(initialForm);
@@ -111,7 +114,7 @@ export default function DailyExpenseBankPage() {
   const openEditDialog = (row: any, idx: number) => {
     const { id, ...rowWithoutId } = row;
     const formWithDefaults = { ...initialForm, ...rowWithoutId };
-    
+
     // Ensure 'Amount (Income/Expense)' is populated from whatever key contains the value
     if (row["Amount (Income/Expense)"] !== undefined) {
       formWithDefaults["Amount (Income/Expense)"] = row["Amount (Income/Expense)"].toString();
@@ -166,7 +169,7 @@ export default function DailyExpenseBankPage() {
         const val = dateFields.includes(key) && value ? dayjs(value).format("YYYY-MM-DD") : value;
         // Map UI key to Firestore key
         const firestoreKey = key === "Amount (Income/Expense)" ? "Amount" : sanitizeKey(key);
-        
+
         // Use normalized amount for the Amount field
         if (firestoreKey === "Amount") {
           sanitizedForm[firestoreKey] = amount;
@@ -199,12 +202,30 @@ export default function DailyExpenseBankPage() {
     });
 
     if (!isConfirmed) return;
-    
-    const success = await deactivateEntry(id);
+
+    const success = await deactivateEntry(id, sendToTelegram);
     if (success) {
       showToast("Record deactivated successfully.", "success");
     } else {
       showToast("Failed to deactivate record.", "error");
+    }
+  };
+
+  const onActivate = async (id: string) => {
+    const isConfirmed = await confirm({
+      title: 'Activate Record?',
+      message: 'Are you sure you want to activate this record again?',
+      confirmText: 'Activate',
+      type: 'info'
+    });
+
+    if (!isConfirmed) return;
+
+    const success = await activateEntry(id, sendToTelegram);
+    if (success) {
+      showToast("Record activated successfully.", "success");
+    } else {
+      showToast("Failed to activate record.", "error");
     }
   };
 
@@ -279,6 +300,23 @@ export default function DailyExpenseBankPage() {
           />
         </div>
 
+        {date && (
+          <div className="grid gap-4 sm:grid-cols-2 animate-fade-in">
+            <OverviewCard
+              label={`Total Debit (${dayjs(date).format('DD MMM')})`}
+              data={{ value: `$${filteredStats.totalDebit.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, growthRate: 0 }}
+              Icon={IncomeIcon}
+              gradient="green"
+            />
+            <OverviewCard
+              label={`Total Credit (${dayjs(date).format('DD MMM')})`}
+              data={{ value: `$${filteredStats.totalCredit.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, growthRate: 0 }}
+              Icon={ExpenseIcon}
+              gradient="red"
+            />
+          </div>
+        )}
+
         <div className="rounded-[10px] border border-stroke bg-white p-4 shadow-1 dark:border-dark-3 dark:bg-gray-dark md:p-6">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
             <div className="relative">
@@ -322,6 +360,16 @@ export default function DailyExpenseBankPage() {
               <option value="All">All Types</option>
               <option value="Income">Income (Debit)</option>
               <option value="Expense">Expense (Credit)</option>
+            </select>
+
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as 'all' | 'active' | 'inactive')}
+              className="w-full rounded-lg border border-stroke bg-gray-2 py-2 px-4 text-sm font-medium text-dark outline-none focus:border-primary dark:border-dark-3 dark:bg-dark-2 dark:text-white"
+            >
+              <option value="all">All Status</option>
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
             </select>
 
             <LocalizationProvider dateAdapter={AdapterDayjs}>
@@ -381,10 +429,11 @@ export default function DailyExpenseBankPage() {
                 handleChange={handleChange}
                 loading={loading}
                 saving={saving}
-                handleExportWithTemplate={() => {}}
+                handleExportWithTemplate={() => { }}
                 dropdownOptions={dropdownOptions}
                 uniqueDescriptions={uniqueDescriptions}
                 handleDeactivate={onDeactivate}
+                handleActivate={onActivate}
                 sendToTelegram={sendToTelegram}
                 setSendToTelegram={setSendToTelegram}
                 bankName={bankName}

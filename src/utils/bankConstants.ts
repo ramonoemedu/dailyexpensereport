@@ -1,8 +1,8 @@
 export const BANKS = [
   { id: "chip-mong", name: "Chip Mong Bank" },
-  { id: "cimb", name: "CIMB Bank" },
-  { id: "aba", name: "ABA Bank" },
-  { id: "acleda", name: "ACLEDA Bank" },
+  // { id: "cimb", name: "CIMB Bank" },
+  // { id: "aba", name: "ABA Bank" },
+  // { id: "acleda", name: "ACLEDA Bank" },
 ];
 
 export const getBankName = (id: string) => {

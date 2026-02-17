@@ -73,15 +73,15 @@ export const generateExcel = async (
   // 7. Data Rows
   rows.forEach((row, index) => {
     const isIncome = row.Type === "Income";
-    const amount = Math.abs(parseFloat((row["Amount (Income/Expense)"] || row["Amount"] || 0).toString()));
+    const amount = Math.abs(parseFloat((row["Amount (Income/Expense)"] || row["Amount"] || row["amount"] || 0).toString()));
     
     const dataRow = worksheet.addRow([
       row.Date ? dayjs(row.Date).format('DD-MMM-YYYY') : '',
-      row.Description,
-      row["Payment Method"],
-      row.Category,
-      row.Type,
-      row.Currency,
+      row.Description || row.description || '',
+      row["Payment Method"] || row["Payment_Method"] || '',
+      row.Category || row.category || '',
+      row.Type || row.type || 'Expense',
+      row.Currency || row.currency || 'USD',
       isIncome ? amount : null,
       !isIncome ? amount : null
     ]);
@@ -120,8 +120,8 @@ export const generateExcel = async (
 
   // 8. Totals Section
   const lastRowNumber = worksheet.lastRow!.number + 2;
-  const totalDebit = rows.reduce((acc, row) => acc + (row.Type === "Income" ? parseFloat((row["Amount (Income/Expense)"] || row["Amount"] || 0).toString()) : 0), 0);
-  const totalCredit = rows.reduce((acc, row) => acc + (row.Type !== "Income" ? parseFloat((row["Amount (Income/Expense)"] || row["Amount"] || 0).toString()) : 0), 0);
+  const totalDebit = rows.reduce((acc, row) => acc + (row.Type === "Income" ? parseFloat((row["Amount (Income/Expense)"] || row["Amount"] || row["amount"] || 0).toString()) : 0), 0);
+  const totalCredit = rows.reduce((acc, row) => acc + (row.Type !== "Income" ? parseFloat((row["Amount (Income/Expense)"] || row["Amount"] || row["amount"] || 0).toString()) : 0), 0);
   const balance = totalDebit - totalCredit;
 
   // Labels

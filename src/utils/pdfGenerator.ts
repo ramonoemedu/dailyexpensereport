@@ -45,8 +45,8 @@ export const generatePdf = (
   doc.text(`Exported by: System Administrator`, margin, 57);
 
   // 4. Summary Card (Top Right)
-  const totalDebit = rows.reduce((acc, row) => acc + (row.Type === "Income" ? parseFloat((row["Amount (Income/Expense)"] || row["Amount"] || 0).toString()) : 0), 0);
-  const totalCredit = rows.reduce((acc, row) => acc + (row.Type !== "Income" ? parseFloat((row["Amount (Income/Expense)"] || row["Amount"] || 0).toString()) : 0), 0);
+  const totalDebit = rows.reduce((acc, row) => acc + (row.Type === "Income" ? parseFloat((row["Amount (Income/Expense)"] || row["Amount"] || row["amount"] || 0).toString()) : 0), 0);
+  const totalCredit = rows.reduce((acc, row) => acc + (row.Type !== "Income" ? parseFloat((row["Amount (Income/Expense)"] || row["Amount"] || row["amount"] || 0).toString()) : 0), 0);
   const balance = totalDebit - totalCredit;
 
   const cardWidth = 80;
@@ -75,13 +75,13 @@ export const generatePdf = (
   // 5. Transaction Ledger Table
   const tableData = rows.map((row) => {
     const isIncome = row.Type === "Income";
-    const amount = Math.abs(parseFloat((row["Amount (Income/Expense)"] || row["Amount"] || 0).toString()));
+    const amount = Math.abs(parseFloat((row["Amount (Income/Expense)"] || row["Amount"] || row["amount"] || 0).toString()));
 
     return [
       row.Date ? dayjs(row.Date).format("DD MMM YYYY") : "",
-      row.Description || "",
-      row.Category || "",
-      row.Type || "",
+      row.Description || row.description || "",
+      row.Category || row.category || "",
+      row.Type || row.type || "Expense",
       isIncome ? `+$${amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : "",
       !isIncome ? `-$${amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : "",
     ];

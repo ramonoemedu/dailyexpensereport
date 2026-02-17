@@ -58,67 +58,100 @@ export function getSmartSuggestions(input: string, allDescriptions: string[]): s
  * Automatically categorizes a description based on keywords.
  */
 export function autoCategorize(description: string, currentCategory?: string): string {
-  // If user already picked a specific category, don't override it unless it's empty
-  if (currentCategory && currentCategory !== "Uncategorized" && currentCategory !== "General/Other" && currentCategory !== "") {
+  // If user already picked a specific category, don't override it unless it's empty or generic
+  const genericCategories = ["Uncategorized", "General/Other", "Other", "", "N/A"];
+  if (currentCategory && !genericCategories.includes(currentCategory)) {
     return currentCategory;
   }
   
   const desc = description.toLowerCase();
   
-  // Food & Dining
+  // Food & Drinks
   if (
-    desc.includes("café") || desc.includes("lunch") || desc.includes("dinner") || 
-    desc.includes("food") || desc.includes("restaurant") || desc.includes("drink") || 
-    desc.includes("matcha") || desc.includes("coffee") || desc.includes("coconut") ||
+    desc.includes("café") || desc.includes("coffee") || desc.includes("lunch") || 
+    desc.includes("dinner") || desc.includes("food") || desc.includes("restaurant") || 
+    desc.includes("drink") || desc.includes("matcha") || desc.includes("coconut") ||
     desc.includes("bread") || desc.includes("water") || desc.includes("ice cream") ||
     desc.includes("burger") || desc.includes("pizza") || desc.includes("kfc") ||
-    desc.includes("meat") || desc.includes("vegetable") || desc.includes("fruit")
-  ) return "Food & Dining";
+    desc.includes("meat") || desc.includes("vegetable") || desc.includes("fruit") ||
+    desc.includes("bakery") || desc.includes("noodle") || desc.includes("starbuck") ||
+    desc.includes("soup") || desc.includes("oyster") || desc.includes("coke") ||
+    desc.includes("coca") || desc.includes("beer") || desc.includes("wisky") ||
+    desc.includes("swicky") || desc.includes("wine")
+  ) return "Food & Drinks";
 
   // Transportation
   if (
-    desc.includes("gasoline") || desc.includes("taxi") || desc.includes("grab") || 
-    desc.includes("car") || desc.includes("hometown") || desc.includes("tuktuk") ||
-    desc.includes("passapp") || desc.includes("fuel") || desc.includes("parking")
+    desc.includes("gasoline") || desc.includes("fuel") || desc.includes("taxi") || 
+    desc.includes("grab") || desc.includes("car") || desc.includes("hometown") || 
+    desc.includes("tuktuk") || desc.includes("passapp") || desc.includes("parking") ||
+    desc.includes("moto") || desc.includes("bus") || desc.includes("trip") ||
+    desc.includes("caltex") || desc.includes("totalenerg") || desc.includes("tela") ||
+    desc.includes("ptt")
   ) return "Transportation";
 
-  // Utilities & Bills
+  // Utilities
   if (
-    desc.includes("electricity") || desc.includes("water bill") || desc.includes("internet") || 
-    desc.includes("phone") || desc.includes("top up") || desc.includes("mobile data")
+    desc.includes("electricity") || desc.includes("edc") || desc.includes("water bill") || 
+    desc.includes("internet") || desc.includes("phone") || desc.includes("top up") || 
+    desc.includes("mobile data") || desc.includes("cellcard") || desc.includes("smart") ||
+    desc.includes("metfone") || desc.includes("refill") || desc.includes("wifi")
   ) return "Utilities";
 
-  // Salary/Income
+  // Health
   if (
-    desc.includes("salary") || desc.includes("income") || desc.includes("bonus") || 
-    desc.includes("receive") || desc.includes("interest")
-  ) return "Salary/Income";
+    desc.includes("health") || desc.includes("hospital") || desc.includes("doctor") || 
+    desc.includes("medichine") || desc.includes("medicine") || desc.includes("pharmacy") ||
+    desc.includes("dentist") || desc.includes("teeth") || desc.includes("sick") ||
+    desc.includes("clinic") || desc.includes("vitamin") || desc.includes("supplement")
+  ) return "Health";
 
-  // Personal Care
-  if (
-    desc.includes("nail") || desc.includes("cream") || desc.includes("skincare") || 
-    desc.includes("body") || desc.includes("hair") || desc.includes("massage") ||
-    desc.includes("shampoo") || desc.includes("soap")
-  ) return "Personal Care";
-
-  // Loans & Debt
-  if (
-    desc.includes("loan") || desc.includes("aeon") || desc.includes("interest") ||
-    desc.includes("credit card") || desc.includes("pay back")
-  ) return "Loans & Debt";
-
-  // Family Support
+  // Family
   if (
     desc.includes("mak") || desc.includes("pa") || desc.includes("pha") || 
-    desc.includes("hea") || desc.includes("send to") || desc.includes("family") ||
-    desc.includes("support")
-  ) return "Family Support";
+    desc.includes("hea") || desc.includes("jee") || desc.includes("send to") || 
+    desc.includes("family") || desc.includes("support") || desc.includes("parent") ||
+    desc.includes("wife") || desc.includes("husband") || desc.includes("child") ||
+    desc.includes("baby") || desc.includes("diaper") || desc.includes("milk powder")
+  ) return "Family";
 
   // Shopping
   if (
     desc.includes("clothes") || desc.includes("shoes") || desc.includes("electronic") ||
-    desc.includes("iphone") || desc.includes("gadget") || desc.includes("mall")
+    desc.includes("iphone") || desc.includes("gadget") || desc.includes("mall") ||
+    desc.includes("shopping") || desc.includes("dress") || desc.includes("skirt") ||
+    desc.includes("shirt") || desc.includes("watch") || desc.includes("lipstick") ||
+    desc.includes("makeup") || desc.includes("make up") || desc.includes("skincare") ||
+    desc.includes("shampoo") || desc.includes("soap") || desc.includes("nail") ||
+    desc.includes("cream") || desc.includes("aeon") || desc.includes("lucky express") ||
+    desc.includes("mart")
   ) return "Shopping";
+
+  // Entertainment
+  if (
+    desc.includes("movie") || desc.includes("cinema") || desc.includes("game") || 
+    desc.includes("netflix") || desc.includes("concert") || desc.includes("party") ||
+    desc.includes("holiday") || desc.includes("vacation") || desc.includes("hotel") ||
+    desc.includes("resort")
+  ) return "Entertainment";
+
+  // Education
+  if (
+    desc.includes("school") || desc.includes("university") || desc.includes("course") || 
+    desc.includes("book") || desc.includes("training") || desc.includes("tuition")
+  ) return "Education";
+
+  // Investment
+  if (
+    desc.includes("invest") || desc.includes("stock") || desc.includes("crypto") || 
+    desc.includes("property") || desc.includes("gold") || desc.includes("saving")
+  ) return "Investment";
+
+  // Gift & Donation
+  if (
+    desc.includes("gift") || desc.includes("donation") || desc.includes("present") || 
+    desc.includes("wedding") || desc.includes("charity") || desc.includes("tip")
+  ) return "Gift & Donation";
   
-  return "General/Other";
+  return "Other";
 }

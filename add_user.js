@@ -15,9 +15,9 @@ const db = getFirestore(app);
 
 async function addUser() {
   const newUser = {
-    username: 'admin',
+    username: 'ramonoem',
     userId: '007',
-    loginEmail: 'ramonoemedu@gmail.com', // Mapping to your existing email
+    loginEmail: 'ramonoem@clearport.local',
     status: 'active'
   };
 

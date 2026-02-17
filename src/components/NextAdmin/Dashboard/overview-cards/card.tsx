@@ -32,33 +32,32 @@ export function OverviewCard({ label, data, Icon, gradient }: PropsType) {
       {/* Glossy Overlay */}
       <div className="absolute inset-0 bg-gradient-to-tr from-white/10 to-transparent pointer-events-none" />
 
-      {/* --- BACKGROUND ICON: This prevents the icon from blocking the text --- */}
+      {/* --- BACKGROUND ICON: Highly subtle to prevent interference --- */}
       <div className={cn(
-        "absolute -top-2 -right-2 transition-transform duration-500 group-hover:-translate-x-2 group-hover:translate-y-2 group-hover:rotate-12",
-        gradient ? "text-white/10" : "text-primary/5"
+        "absolute -bottom-6 -right-6 transition-transform duration-500 group-hover:-translate-x-1 group-hover:-translate-y-1 group-hover:rotate-6",
+        gradient ? "text-white/[0.03]" : "text-primary/[0.03]"
       )}>
-        <Icon className="w-24 h-24"
-        />
+        <Icon className="w-20 h-20" />
       </div>
 
       <div className="relative z-10 flex flex-col justify-between h-full">
-        <div className="flex flex-col">
-          <p className="text-[10px] font-black uppercase tracking-[0.2em] opacity-70 mb-1 truncate pr-10">
+        <div className="flex flex-col pr-8">
+          <p className="text-[10px] font-black uppercase tracking-[0.2em] opacity-70 mb-1 truncate">
             {label}
           </p>
 
-          <h3 className="text-2xl font-black tracking-tight leading-none break-words">
+          <h3 className="text-xl font-black tracking-tight leading-tight break-words">
             {data.value}
           </h3>
         </div>
 
-        {/* Floating Mini Icon (Top Right) - Smaller and doesn't overlap */}
+        {/* Floating Mini Icon (Top Right) */}
         <div className="absolute top-0 right-0">
           <div className={cn(
-            "rounded-2xl p-2 backdrop-blur-md border border-white/10",
-            gradient ? "bg-white/15" : "bg-gray-100 dark:bg-white/5 text-primary"
+            "rounded-xl p-1.5 backdrop-blur-md border border-white/10",
+            gradient ? "bg-white/10" : "bg-gray-100 dark:bg-white/5 text-primary"
           )}>
-            <Icon className="w-7 h-7" />
+            <Icon className="w-5 h-5" />
           </div>
         </div>
 

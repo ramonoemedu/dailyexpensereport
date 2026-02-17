@@ -20,13 +20,14 @@ export default function DashboardPage() {
 
   const [month, setMonth] = useState(new Date().getMonth());
   const [year, setYear] = useState(new Date().getFullYear());
+  const [statusFilter, setStatusFilter] = useState<'active' | 'all'>('active');
 
   useEffect(() => {
     let isMounted = true;
     async function loadStats() {
       setLoading(true);
       try {
-        const data = await getClearPortStats(month, year);
+        const data = await getClearPortStats(month, year, { statusFilter });
         if (isMounted) setStats(data);
       } catch (error) {
         console.error("Dashboard load error:", error);
@@ -36,7 +37,7 @@ export default function DashboardPage() {
     }
     loadStats();
     return () => { isMounted = false; };
-  }, [month, year]);
+  }, [month, year, statusFilter]);
 
   const months = useMemo(() => [
     "January", "February", "March", "April", "May", "June",
@@ -60,7 +61,8 @@ export default function DashboardPage() {
     );
   }
 
-  const bankBalance = (stats.startingBalance || 0) + (stats.monthlyIncome || 0) - (stats.monthlyAmount || 0);
+  // Use the balance directly from stats service which now correctly respects statusFilter
+  const bankBalance = stats.currentBalance || 0;
 
   return (
     <div className="mx-auto w-full max-w-full space-y-8 p-4 md:p-6 animate-fade-in">
@@ -77,6 +79,14 @@ export default function DashboardPage() {
         </div>
 
         <div className="flex items-center gap-3 bg-white dark:bg-dark-2 p-2 rounded-2xl shadow-sm border border-stroke dark:border-dark-3">
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as 'active' | 'all')}
+            className="bg-transparent px-3 py-1 text-sm font-bold outline-none cursor-pointer border-r border-stroke dark:border-dark-3"
+          >
+            <option value="active">Active Only</option>
+            <option value="all">Include All</option>
+          </select>
           <select
             value={month}
             onChange={(e) => setMonth(parseInt(e.target.value))}
@@ -96,7 +106,7 @@ export default function DashboardPage() {
       </div>
 
       {/* --- Top Gradient Cards --- */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         <OverviewCard
           label="Initial Carryover"
           data={{
@@ -120,11 +130,21 @@ export default function DashboardPage() {
         <OverviewCard
           label="Bank Balance"
           data={{
-            value: `$${bankBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
+            value: `$${(stats.bankBalance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
             growthRate: 0,
           }}
           Icon={ProfitIcon}
           gradient="dark"
+        />
+
+        <OverviewCard
+          label="Cash Balance"
+          data={{
+            value: `$${(stats.cashBalance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
+            growthRate: 0,
+          }}
+          Icon={ProfitIcon}
+          gradient="orange"
         />
 
         <OverviewCard
