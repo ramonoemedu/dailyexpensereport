@@ -228,19 +228,20 @@ const ExpenseDataFormPage: React.FC<Props> = ({
                 </div>
                 <div className="grid grid-cols-1 gap-x-6 gap-y-5 sm:grid-cols-2">
                   {columns.map((col) => {
-                    if (col === "Credit" || col === "Date" || col === "Category") return null;
+                    if (col === "Credit" || col === "Date" || col === "Category" || col === "Currency") return null;
 
                     const isDebit = col === "Debit";
                     const isDescription = col === "Description";
-                    const label = isDebit ? "Amount (USD)" : (col === "Type" ? "Expense Type" : col);
+                    const currentCurrency = form["Currency"] || "USD";
+                    const label = isDebit ? `Amount (${currentCurrency})` : (col === "Type" ? "Expense Type" : col);
                     const valueKey = isDebit ? "Amount (Income/Expense)" : col;
 
                     let options = dropdownOptions[col];
 
-                    const handleKhrChange = (val: string) => {
+                    const handleKhrHelperChange = (val: string) => {
                       const numericVal = val.replace(/[^0-9]/g, '');
                       setKhrAmount(numericVal);
-                      if (numericVal) {
+                      if (numericVal && currentCurrency === "USD") {
                         const usdAmount = exchangeRateService.convertToUSD(parseFloat(numericVal), exchangeRate);
                         handleChange("Amount (Income/Expense)", usdAmount.toString());
                       }
@@ -248,15 +249,15 @@ const ExpenseDataFormPage: React.FC<Props> = ({
 
                     return (
                       <React.Fragment key={col}>
-                        {isDebit && form["Payment Method"] === "Cash" && (
-                          <FormField label="Amount (KHR)">
+                        {isDebit && form["Payment Method"] === "Cash" && currentCurrency === "USD" && (
+                          <FormField label="KHR Helper (Auto-convert to USD)">
                             <div className="relative">
                               <input
                                 type="text"
                                 value={khrAmount}
-                                onChange={(e) => handleKhrChange(e.target.value)}
+                                onChange={(e) => handleKhrHelperChange(e.target.value)}
                                 autoComplete="off"
-                                placeholder="Enter amount in Riel"
+                                placeholder="Enter amount in Riel to convert"
                                 className="w-full rounded-xl border border-stroke bg-gray-2 px-4 py-2.5 text-sm text-dark outline-none transition-all focus:border-primary focus:ring-4 focus:ring-primary/10 dark:border-dark-3 dark:bg-dark-2 dark:text-white dark:focus:border-primary"
                               />
                               <div className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-bold text-dark-5 dark:text-dark-6 bg-white dark:bg-dark-3 px-2 py-1 rounded-lg border border-stroke dark:border-dark-4">
@@ -318,26 +319,45 @@ const ExpenseDataFormPage: React.FC<Props> = ({
                     );
                   })}
 
-                  {/* Date picker separately or as part of loop if included */}
-                  <FormField label="Date" className="sm:col-span-2">
-                    <DatePicker
-                      value={form["Date"] ? dayjs(form["Date"]) : null}
-                      onChange={(date) => handleChange("Date", date ? date.format("YYYY-MM-DD") : "")}
-                      slotProps={{
-                        textField: {
-                          size: "small",
-                          fullWidth: true,
-                          sx: {
-                            '& .MuiOutlinedInput-root': {
-                              borderRadius: '12px',
-                              backgroundColor: 'var(--color-gray-2)',
-                              '& fieldset': { borderColor: 'var(--color-stroke)' },
+                  <div className="grid grid-cols-2 gap-6 sm:col-span-2">
+                    <FormField label="Currency">
+                      <select
+                        value={form["Currency"] || "USD"}
+                        onChange={(e) => handleChange("Currency", e.target.value)}
+                        className="w-full rounded-xl border border-stroke bg-gray-2 px-4 py-2.5 text-sm text-dark outline-none transition-all focus:border-primary focus:ring-4 focus:ring-primary/10 dark:border-dark-3 dark:bg-dark-2 dark:text-white dark:focus:border-primary"
+                      >
+                        {dropdownOptions["Currency"]?.map((opt) => (
+                          <option key={opt} value={opt}>{opt}</option>
+                        ))}
+                      </select>
+                    </FormField>
+
+                    <FormField label="Date">
+                      <DatePicker
+                        value={form["Date"] ? dayjs(form["Date"]) : null}
+                        onChange={(date) => handleChange("Date", date ? date.format("YYYY-MM-DD") : "")}
+                        slotProps={{
+                          textField: {
+                            size: "small",
+                            fullWidth: true,
+                            onClick: (e) => {
+                              const button = (e.currentTarget as HTMLElement).querySelector('button');
+                              button?.click();
+                            },
+                            sx: {
+                              cursor: 'pointer',
+                              '& .MuiOutlinedInput-root': {
+                                borderRadius: '12px',
+                                backgroundColor: 'var(--color-gray-2)',
+                                '& fieldset': { borderColor: 'var(--color-stroke)' },
+                                '& input': { cursor: 'pointer' }
+                              }
                             }
-                          }
-                        },
-                      }}
-                    />
-                  </FormField>
+                          },
+                        }}
+                      />
+                    </FormField>
+                  </div>
 
                   {/* Telegram Notification Checkbox */}
                   {setSendToTelegram && (

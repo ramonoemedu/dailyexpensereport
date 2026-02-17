@@ -28,4 +28,5 @@ export const columns = [
   "Credit",
   "Type",
   "Payment Method",
+  "Currency",
 ];

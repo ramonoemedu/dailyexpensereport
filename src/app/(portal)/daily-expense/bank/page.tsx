@@ -18,6 +18,8 @@ import {
   Product as BalanceIcon 
 } from "@/components/NextAdmin/Dashboard/overview-cards/icons";
 import { useToast } from "@/components/NextAdmin/ui/toast";
+import { ConfirmationDialog } from "@/components/NextAdmin/ui/ConfirmationDialog";
+import { useConfirm } from "@/hooks/NextAdmin/useConfirm";
 
 const initialForm = columns.reduce((acc, col) => {
   if (dateFields.includes(col)) {
@@ -26,13 +28,15 @@ const initialForm = columns.reduce((acc, col) => {
     acc[col] = "Expense";
   } else if (col === "Payment Method") {
     acc[col] = "Chip Mong Bank";
+  } else if (col === "Currency") {
+    acc[col] = "USD";
   } else {
     acc[col] = "";
   }
   return acc;
 }, {} as Record<string, string>);
 
-export default function DailyExpenseRoute() {
+export default function DailyExpenseBankPage() {
   const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
   const {
     rows,
@@ -45,8 +49,12 @@ export default function DailyExpenseRoute() {
     deactivateEntry,
     stats,
     uniqueDescriptions,
-  } = useExpenseData();
+  } = useExpenseData({ 
+    paymentMethodFilter: ["ABA Bank", "ACLEDA Bank", "Chip Mong Bank", "From Chipmong bank to ACALEDA", "CIMB Bank"],
+    balanceType: 'bank'
+  });
   const { showToast } = useToast();
+  const { confirm, isOpen: isConfirmOpen, options: confirmOptions, handleConfirm, handleCancel } = useConfirm();
 
   const [form, setForm] = useState<Record<string, string>>(initialForm);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -176,7 +184,14 @@ export default function DailyExpenseRoute() {
   };
 
   const onDeactivate = async (id: string) => {
-    if (!confirm("Are you sure you want to deactivate this record? It will be hidden from reports.")) return;
+    const isConfirmed = await confirm({
+      title: 'Deactivate Record?',
+      message: 'Are you sure you want to deactivate this record? It will be hidden from reports.',
+      confirmText: 'Deactivate',
+      type: 'danger'
+    });
+
+    if (!isConfirmed) return;
     
     const success = await deactivateEntry(id);
     if (success) {
@@ -194,14 +209,23 @@ export default function DailyExpenseRoute() {
 
   return (
     <div className="mx-auto w-full max-w-full space-y-6">
+      <ConfirmationDialog
+        open={isConfirmOpen}
+        title={confirmOptions?.title || ''}
+        message={confirmOptions?.message || ''}
+        confirmText={confirmOptions?.confirmText}
+        type={confirmOptions?.type}
+        onConfirm={handleConfirm}
+        onCancel={handleCancel}
+      />
       <div className="flex flex-col gap-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <h1 className="text-heading-5 font-bold text-dark dark:text-white">
-              Daily Expense Report
+              Daily Expense Report (Bank)
             </h1>
             <p className="text-body-sm font-medium text-dark-5">
-              Manage and track daily expenses
+              Manage and track daily bank expenses
             </p>
           </div>
 

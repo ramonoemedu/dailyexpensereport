@@ -4,7 +4,7 @@ import { sanitizeKey } from "@/utils/KeySanitizer";
 import dayjs from "dayjs";
 import { autoCategorize } from "@/utils/DescriptionHelper";
 
-export async function getClearPortStats(month?: number, year?: number) {
+export async function getClearPortStats(month?: number, year?: number, options?: { paymentMethodFilter?: string | string[], currencyFilter?: string }) {
   try {
     const snapshot = await getDocs(collection(db, "expenses"));
     const now = dayjs();
@@ -29,17 +29,27 @@ export async function getClearPortStats(month?: number, year?: number) {
     let anchorMonth = 0;
     let hasAnchor = false;
 
+    const isCashReport = options?.paymentMethodFilter === "Cash" || (Array.isArray(options?.paymentMethodFilter) && options?.paymentMethodFilter.includes("Cash") && options?.paymentMethodFilter.length === 1);
+
     try {
       const balanceSnapshot = await getDocs(collection(db, "settings"));
+      const balancePrefix = isCashReport ? "cash_balance_" : "balance_";
+      
       const balanceRecords = balanceSnapshot.docs
-        .filter(d => d.id.startsWith("balance_"))
+        .filter(d => d.id.startsWith(balancePrefix))
         .map(d => {
           const parts = d.id.split("_");
-          return { 
-            year: parseInt(parts[1]), 
-            month: parseInt(parts[2]), 
-            amount: parseFloat(d.data().amount || 0)
-          };
+          const year = isCashReport ? parseInt(parts[2]) : parseInt(parts[1]);
+          const month = isCashReport ? parseInt(parts[3]) : parseInt(parts[2]);
+          
+          let amount = 0;
+          if (isCashReport && options?.currencyFilter === "KHR") {
+            amount = parseFloat(d.data().amountKHR || 0);
+          } else {
+            amount = parseFloat(d.data().amount || 0);
+          }
+
+          return { year, month, amount };
         })
         .sort((a, b) => (a.year * 12 + a.month) - (b.year * 12 + b.month));
 
@@ -51,16 +61,6 @@ export async function getClearPortStats(month?: number, year?: number) {
         anchorYear = anchor.year;
         anchorMonth = anchor.month;
         hasAnchor = true;
-      } else {
-        // Fallback: Specifically check for Jan 2026 if no anchor found
-        const janRef = doc(db, "settings", "balance_2026_0");
-        const janSnap = await getDoc(janRef);
-        if (janSnap.exists()) {
-          startingBalance = janSnap.data().amount || 0;
-          anchorYear = 2026;
-          anchorMonth = 0;
-          hasAnchor = true;
-        }
       }
     } catch (e) {
       console.error("Error fetching balances:", e);
@@ -71,6 +71,22 @@ export async function getClearPortStats(month?: number, year?: number) {
     snapshot.docs.forEach(doc => {
       const data = doc.data();
       if (data.status === 'inactive') return; // Skip inactive records
+
+      // Apply paymentMethodFilter - use sanitized key
+      if (options?.paymentMethodFilter) {
+        const method = data[sanitizeKey("Payment Method")] || data["Payment Method"];
+        if (Array.isArray(options.paymentMethodFilter)) {
+          if (!options.paymentMethodFilter.includes(method)) return;
+        } else {
+          if (method !== options.paymentMethodFilter) return;
+        }
+      }
+
+      // Apply currencyFilter
+      const currency = data["Currency"] || "USD";
+      if (options?.currencyFilter) {
+        if (currency !== options.currencyFilter) return;
+      }
 
       const dateStr = data[sanitizeKey("Date")] || data["Date"];
       if (!dateStr) return;
@@ -95,6 +111,7 @@ export async function getClearPortStats(month?: number, year?: number) {
         const targetTime = targetYear * 12 + targetMonth;
 
         if (transTime >= anchorTime && transTime < targetTime) {
+          // IMPORTANT: Only add to startingBalance if it matches the current currency we are reporting on
           if (isIncome) startingBalance += amount;
           else startingBalance -= amount;
         }
@@ -116,7 +133,8 @@ export async function getClearPortStats(month?: number, year?: number) {
           category: category,
           amount: amount,
           type: data["Type"],
-          paymentMethod: data["Payment Method"],
+          paymentMethod: data[sanitizeKey("Payment Method")] || data["Payment Method"],
+          currency: currency,
           isFuture
         });
 
@@ -170,11 +188,7 @@ export async function getClearPortStats(month?: number, year?: number) {
       .sort(([, a], [, b]) => b - a)
       .map(([name, value]) => ({ name, value }));
 
-    // currentBalance should be Starting Balance of anchor + all non-future transactions from anchor onwards
-    // Since we initialized startingBalance with anchor and added all transactions before targetMonth, 
-    // and totalBalance is just sum of ALL non-future transactions, we need to adjust totalBalance.
-    
-    const finalCurrentBalance = hasAnchor ? (startingBalance + monthlyIncome - monthlyAmount) : totalBalance;
+    const finalCurrentBalance = startingBalance + monthlyIncome - monthlyAmount;
 
     return {
       monthlyTransactions,

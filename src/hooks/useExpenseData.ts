@@ -17,7 +17,7 @@ import {
 import { PAGE_SIZE, sanitizeKey, unsanitizeKey } from "@/utils/KeySanitizer";
 import { sendTelegramNotification, formatExpenseMessage } from "@/utils/telegramService";
 
-export function useExpenseData() {
+export function useExpenseData(options?: { paymentMethodFilter?: string | string[], balanceType?: 'bank' | 'cash' }) {
   const [allRows, setAllRows] = useState<Record<string, any>[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -58,14 +58,19 @@ export function useExpenseData() {
 
       // Fetch Balances
       const balanceSnapshot = await getDocs(collection(db, "settings"));
+      const balancePrefix = options?.balanceType === 'cash' ? "cash_balance_" : "balance_";
       const balances = balanceSnapshot.docs
-        .filter(d => d.id.startsWith("balance_"))
+        .filter(d => d.id.startsWith(balancePrefix))
         .map(d => {
           const parts = d.id.split("_");
+          // parts will be ['balance', 'YYYY', 'MM'] or ['cash', 'balance', 'YYYY', 'MM']
+          const year = options?.balanceType === 'cash' ? parseInt(parts[2]) : parseInt(parts[1]);
+          const month = options?.balanceType === 'cash' ? parseInt(parts[3]) : parseInt(parts[2]);
           return { 
-            year: parseInt(parts[1]), 
-            month: parseInt(parts[2]), 
-            amount: parseFloat(d.data().amount || 0)
+            year, 
+            month, 
+            amount: parseFloat(d.data().amount || 0),
+            amountKHR: parseFloat(d.data().amountKHR || 0)
           };
         })
         .sort((a, b) => (a.year * 12 + a.month) - (b.year * 12 + b.month));
@@ -76,10 +81,20 @@ export function useExpenseData() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [options?.balanceType]);
 
   const filteredRows = useMemo(() => {
     return allRows.filter((row) => {
+      // Apply paymentMethodFilter if provided
+      if (options?.paymentMethodFilter) {
+        const method = row["Payment Method"];
+        if (Array.isArray(options.paymentMethodFilter)) {
+          if (!options.paymentMethodFilter.includes(method)) return false;
+        } else {
+          if (method !== options.paymentMethodFilter) return false;
+        }
+      }
+
       if (filters.searchText) {
         const search = filters.searchText.toLowerCase();
         const searchFields = ["Description", "Payment Method", "Category"];
@@ -129,6 +144,11 @@ export function useExpenseData() {
       totalExpense: 0,
       startingBalance: 0,
       currentBalance: 0,
+      // Cash specific dual currency stats
+      startingBalanceKHR: 0,
+      monthlyIncomeKHR: 0,
+      monthlyExpenseKHR: 0,
+      currentBalanceKHR: 0,
     };
 
     // Find anchor balance
@@ -136,12 +156,14 @@ export function useExpenseData() {
     const anchor = [...balanceRecords].reverse().find(r => (r.year * 12 + r.month) <= targetTime);
     
     let baseBalance = 0;
+    let baseBalanceKHR = 0;
     let anchorYear = 0;
     let anchorMonth = 0;
     let hasAnchor = false;
 
     if (anchor) {
-      baseBalance = anchor.amount;
+      baseBalance = (anchor as any).amount || 0;
+      baseBalanceKHR = (anchor as any).amountKHR || 0;
       anchorYear = anchor.year;
       anchorMonth = anchor.month;
       hasAnchor = true;
@@ -150,19 +172,35 @@ export function useExpenseData() {
     allRows.forEach(row => {
       if (row.status === 'inactive') return;
 
+      // Apply paymentMethodFilter to stats calculation
+      if (options?.paymentMethodFilter) {
+        const method = row["Payment Method"];
+        if (Array.isArray(options.paymentMethodFilter)) {
+          if (!options.paymentMethodFilter.includes(method)) return;
+        } else {
+          if (method !== options.paymentMethodFilter) return;
+        }
+      }
+
       const date = dayjs(row.Date);
       const isFuture = date.isAfter(dayjs(), 'day');
 
       const amount = Math.abs(parseFloat(row["Amount (Income/Expense)"] || row["Amount"] || 0));
+      const currency = row["Currency"] || "USD";
       const isIncome = row.Type === 'Income';
 
-      // 1. Calculate Carryover for "startingBalance"
+      // 1. Calculate Carryover
       if (hasAnchor) {
         const transTime = date.year() * 12 + date.month();
         const anchorTime = anchorYear * 12 + anchorMonth;
         if (transTime >= anchorTime && transTime < targetTime) {
-          if (isIncome) baseBalance += amount;
-          else baseBalance -= amount;
+          if (currency === "KHR") {
+            if (isIncome) baseBalanceKHR += amount;
+            else baseBalanceKHR -= amount;
+          } else {
+            if (isIncome) baseBalance += amount;
+            else baseBalance -= amount;
+          }
         }
       }
 
@@ -172,22 +210,33 @@ export function useExpenseData() {
       const isTargetMonth = date.month() === filterMonth && date.year() === filterYear;
       const isTargetWeek = date.isSame(dayjs(), 'week'); 
 
-      if (isIncome) {
-        result.totalIncome += amount;
-        if (isTargetWeek) result.weeklyIncome += amount;
-        if (isTargetMonth) result.monthlyIncome += amount;
+      if (currency === "KHR") {
+        if (isIncome) {
+          if (isTargetMonth) result.monthlyIncomeKHR += amount;
+        } else {
+          if (isTargetMonth) result.monthlyExpenseKHR += amount;
+        }
       } else {
-        result.totalExpense += amount;
-        if (isTargetWeek) result.weeklyExpense += amount;
-        if (isTargetMonth) result.monthlyExpense += amount;
+        if (isIncome) {
+          result.totalIncome += amount;
+          if (isTargetWeek) result.weeklyIncome += amount;
+          if (isTargetMonth) result.monthlyIncome += amount;
+        } else {
+          result.totalExpense += amount;
+          if (isTargetWeek) result.weeklyExpense += amount;
+          if (isTargetMonth) result.monthlyExpense += amount;
+        }
       }
     });
 
     result.startingBalance = baseBalance;
     result.currentBalance = baseBalance + result.monthlyIncome - result.monthlyExpense;
+    
+    result.startingBalanceKHR = baseBalanceKHR;
+    result.currentBalanceKHR = baseBalanceKHR + result.monthlyIncomeKHR - result.monthlyExpenseKHR;
 
     return result;
-  }, [allRows, filters.month, filters.year, balanceRecords]);
+  }, [allRows, filters.month, filters.year, balanceRecords, options?.paymentMethodFilter]);
 
   const paginatedRows = useMemo(() => {
     const start = (page - 1) * PAGE_SIZE;
@@ -209,6 +258,7 @@ export function useExpenseData() {
   const [dropdownOptions, setDropdownOptions] = useState<Record<string, string[]>>({
     "Payment Method": ["Cash", "ABA Bank", "ACLEDA Bank", "Chip Mong Bank", "From Chipmong bank to ACALEDA", "CIMB Bank"],
     "Type": ["Expense", "Income"],
+    "Currency": ["USD", "KHR"],
     "Category": [],
     "incomeCategories": [],
     "expenseCategories": []

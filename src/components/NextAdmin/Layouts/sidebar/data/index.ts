@@ -33,17 +33,32 @@ export const NAV_DATA: NavSection[] = [
       },
       {
         title: "Daily Expense",
-        url: "/daily-expense",
         icon: Icons.Alphabet,
-        items: [],
+        items: [
+          {
+            title: "Daily Expense Report Bank",
+            url: "/daily-expense/bank",
+            icon: Icons.Table,
+          },
+          {
+            title: "Daily Expense Report Cash",
+            url: "/daily-expense/cash",
+            icon: Icons.Table,
+          },
+        ],
       },
       {
         title: "Reports",
         icon: Icons.PieChart,
         items: [
           {
-            title: "Monthly Report",
+            title: "Monthly Report Bank",
             url: "/reports/monthly",
+            icon: Icons.Table,
+          },
+          {
+            title: "Monthly Report Cash",
+            url: "/reports/cash",
             icon: Icons.Table,
           },
         ],
@@ -68,8 +83,13 @@ export const NAV_DATA: NavSection[] = [
             icon: Icons.Calendar,
           },
           {
-            title: "Starting Balance",
+            title: "Starting Balance Bank",
             url: "/settings/balance",
+            icon: Icons.HomeIcon,
+          },
+          {
+            title: "Starting Balance Cash",
+            url: "/settings/cash-balance",
             icon: Icons.HomeIcon,
           },
         ],

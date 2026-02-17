@@ -46,19 +46,19 @@ export function ExpenseDataTable({
       <div className="max-w-full overflow-x-auto">
         <Table>
           <TableHeader>
-            <TableRow className="border-none bg-[#F7F9FC] dark:bg-dark-2 [&>th]:py-4 [&>th]:text-sm [&>th]:font-semibold [&>th]:text-dark [&>th]:dark:text-white">
+            <TableRow className="border-none bg-[#F7F9FC] dark:bg-dark-2 [&>th]:py-4 [&>th]:text-xs [&>th]:font-bold [&>th]:text-dark [&>th]:dark:text-white uppercase tracking-wider">
               {columns.map((col) => (
                 <TableHead 
                   key={col}
                   className={cn(
-                    "whitespace-nowrap px-4",
+                    "whitespace-nowrap px-3",
                     (col === "Debit" || col === "Credit" || col === "Amount") ? "text-right" : "text-left"
                   )}
                 >
-                  {col === "Type" ? "Expense Type" : col}
+                  {col === "Type" ? "Exp Type" : col}
                 </TableHead>
               ))}
-              <TableHead className="sticky right-0 z-10 bg-[#F7F9FC] dark:bg-dark-2 text-center px-4">
+              <TableHead className="sticky right-0 z-10 bg-[#F7F9FC] dark:bg-dark-2 text-center px-3">
                 Actions
               </TableHead>
             </TableRow>
@@ -112,7 +112,7 @@ export function ExpenseDataTable({
                       <TableCell
                         key={col}
                         className={cn(
-                          "whitespace-nowrap px-4 py-3.5 text-sm text-dark dark:text-white",
+                          "whitespace-nowrap px-3 py-3 text-sm text-dark dark:text-white",
                           cellClass
                         )}
                       >
@@ -121,7 +121,10 @@ export function ExpenseDataTable({
                             {displayVal}
                           </span>
                         ) : (
-                          <span className="truncate block max-w-[250px]">
+                          <span className={cn(
+                            "truncate block",
+                            col === "Description" ? "max-w-[200px]" : "max-w-[120px]"
+                          )}>
                             {dateFields.includes(col)
                               ? formatDisplayDate(displayVal as string)
                               : displayVal}
