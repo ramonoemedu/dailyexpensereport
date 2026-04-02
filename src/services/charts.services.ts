@@ -1,45 +1,25 @@
 'use client';
 
 import { db } from "@/lib/firebase";
-import { collection, getDocs, query, orderBy, doc, getDoc } from "firebase/firestore";
+import { collection, getDocs, doc, getDoc } from "firebase/firestore";
 import { sanitizeKey } from "@/utils/KeySanitizer";
 import dayjs from "dayjs";
 import { autoCategorize } from "@/utils/DescriptionHelper";
-import { cacheRead, cacheWrite, cacheInvalidate } from "@/utils/clientCache";
-
-const STATS_CACHE_TTL_MS = 30 * 60_000;   // 30 min — busted on writes
-const RAW_DOCS_CACHE_TTL_MS = 30 * 60_000; // 30 min — busted on writes
-
-// Raw docs stay in memory only (too large for localStorage)
-type RawDocsEntry = { ts: number; docs: Array<{ id: string; data: Record<string, any> }> };
-const rawDocsCache = new Map<string, RawDocsEntry>();
+// In-flight dedup only — no TTL cache (real-time)
+type RawDocsEntry = { docs: Array<{ id: string; data: Record<string, any> }> };
 const rawDocsInflight = new Map<string, Promise<RawDocsEntry["docs"]>>();
 
-function readCache<T>(key: string): T | null {
-  return cacheRead<T>(key, STATS_CACHE_TTL_MS);
-}
-
-function writeCache<T>(key: string, value: T) {
-  cacheWrite(key, value);
-}
-
-export function invalidateFamilyCache(familyId: string) {
-  rawDocsCache.delete(familyId);
-  rawDocsInflight.delete(familyId);
-  cacheInvalidate(familyId);
+export function invalidateFamilyCache(_familyId: string) {
+  // No-op: caching removed, kept for call-site compatibility
 }
 
 async function getFamilyExpenseDocs(familyId: string): Promise<RawDocsEntry["docs"]> {
-  const cached = rawDocsCache.get(familyId);
-  if (cached && Date.now() - cached.ts < RAW_DOCS_CACHE_TTL_MS) return cached.docs;
-
   // Deduplicate concurrent calls — return the same in-flight Promise
   const inflight = rawDocsInflight.get(familyId);
   if (inflight) return inflight;
 
   const promise = getDocs(collection(db, "families", familyId, "expenses")).then(snap => {
     const docs = snap.docs.map(d => ({ id: d.id, data: d.data() as Record<string, any> }));
-    rawDocsCache.set(familyId, { ts: Date.now(), docs });
     rawDocsInflight.delete(familyId);
     return docs;
   }).catch(err => {
@@ -51,10 +31,6 @@ async function getFamilyExpenseDocs(familyId: string): Promise<RawDocsEntry["doc
   return promise;
 }
 
-function stableFilterValue(value: string | string[] | undefined) {
-  if (!Array.isArray(value)) return value || "";
-  return [...value].sort().join("|");
-}
 
 export async function getClearPortStats(month?: number, year?: number, options?: { 
   paymentMethodFilter?: string | string[], 
@@ -64,20 +40,6 @@ export async function getClearPortStats(month?: number, year?: number, options?:
   familyId?: string
 }) {
   try {
-    const cacheKey = [
-      "getClearPortStats",
-      month ?? "",
-      year ?? "",
-      options?.familyId ?? "",
-      stableFilterValue(options?.paymentMethodFilter),
-      options?.currencyFilter ?? "",
-      options?.bankId ?? "",
-      options?.statusFilter ?? "",
-    ].join("::");
-
-    const cached = readCache<any>(cacheKey);
-    if (cached) return cached;
-
     const familyId = options?.familyId;
     if (!familyId) throw new Error("No familyId set for stats");
 
@@ -250,7 +212,6 @@ export async function getClearPortStats(month?: number, year?: number, options?:
       growth: { total: 10, amount: 5 }
     };
 
-    writeCache(cacheKey, result);
     return result;
   } catch (error) {
     console.error("Error fetching expense stats:", error);
@@ -265,10 +226,6 @@ export async function getClearPortStats(month?: number, year?: number, options?:
 
 export async function getClearanceTimelineData(year?: number, familyId?: string) {
   try {
-    const cacheKey = ["getClearanceTimelineData", year ?? "", familyId ?? ""].join("::");
-    const cached = readCache<any>(cacheKey);
-    if (cached) return cached;
-
     if (!familyId) throw new Error("No familyId set for timeline");
     const rawDocs = await getFamilyExpenseDocs(familyId);
     const targetYear = year || dayjs().year();
@@ -307,7 +264,6 @@ export async function getClearanceTimelineData(year?: number, familyId?: string)
       expense: months.map(m => ({ x: m, y: parseFloat(expenseMonthly[m].toFixed(2)) }))
     };
 
-    writeCache(cacheKey, result);
     return result;
   } catch (error) {
     console.error("Error fetching timeline data:", error);
@@ -317,10 +273,6 @@ export async function getClearanceTimelineData(year?: number, familyId?: string)
 
 export async function getWeeksProfitData(month?: number, year?: number, familyId?: string) {
   try {
-    const cacheKey = ["getWeeksProfitData", month ?? "", year ?? "", familyId ?? ""].join("::");
-    const cached = readCache<any>(cacheKey);
-    if (cached) return cached;
-
     if (!familyId) throw new Error("No familyId set for weeks profit");
     const rawDocs = await getFamilyExpenseDocs(familyId);
     const now = dayjs();
@@ -360,7 +312,6 @@ export async function getWeeksProfitData(month?: number, year?: number, familyId
       revenue: topCategories.map(() => ({ x: "", y: 0 })),
     };
 
-    writeCache(cacheKey, result);
     return result;
   } catch (error) {
     console.error("Error fetching category data:", error);

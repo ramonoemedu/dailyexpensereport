@@ -16,19 +16,6 @@ import {
 import { PAGE_SIZE, sanitizeKey, unsanitizeKey } from "@/utils/KeySanitizer";
 import { sendTelegramNotification, formatExpenseMessage } from "@/utils/telegramService";
 import { invalidateFamilyCache } from "@/services/charts.services";
-import { cachedFetch } from "@/utils/clientCache";
-
-const LIST_CACHE_TTL = 30 * 60_000;
-
-const FAMILY_DATA_CACHE_TTL_MS = 20_000;
-
-type FamilyDataCacheEntry = {
-  ts: number;
-  rows: Record<string, any>[];
-  config: any;
-};
-
-const familyDataCache = new Map<string, FamilyDataCacheEntry>();
 
 // Module-level cache for dropdown/settings so Firestore isn't re-read on every mount
 type SettingsCacheEntry = {
@@ -114,48 +101,33 @@ export function useExpenseData(options?: {
         setBalanceRecords([]);
         return;
       }
-      const cached = !forceRefresh ? familyDataCache.get(familyId) : null;
-      const hasFreshCache =
-        !!cached && Date.now() - cached.ts <= FAMILY_DATA_CACHE_TTL_MS;
-
       let data: Record<string, any>[] = [];
       let config: any = null;
 
-      if (hasFreshCache && cached) {
-        data = cached.rows;
-        config = cached.config;
-      } else {
-        // Fetch Expenses from new path
-        const q = query(
-          collection(db, "families", familyId, "expenses"),
-          orderBy("Date", "desc"),
-          orderBy("createdAt", "desc")
-        );
-        const snapshot = await getDocs(q);
-        data = snapshot.docs.map((doc) => {
-          const raw = doc.data();
-          const mapped: { id: string; [key: string]: any } = { id: doc.id };
-          for (const key of Object.keys(raw)) {
-            const uiKey = unsanitizeKey(key);
-            if (uiKey === "Amount") {
-              mapped["Amount (Income/Expense)"] = raw[key];
-            } else {
-              mapped[uiKey] = raw[key];
-            }
+      // Always fetch fresh — no client-side cache
+      const q = query(
+        collection(db, "families", familyId, "expenses"),
+        orderBy("Date", "desc"),
+        orderBy("createdAt", "desc")
+      );
+      const snapshot = await getDocs(q);
+      data = snapshot.docs.map((doc) => {
+        const raw = doc.data();
+        const mapped: { id: string; [key: string]: any } = { id: doc.id };
+        for (const key of Object.keys(raw)) {
+          const uiKey = unsanitizeKey(key);
+          if (uiKey === "Amount") {
+            mapped["Amount (Income/Expense)"] = raw[key];
+          } else {
+            mapped[uiKey] = raw[key];
           }
-          if (!mapped["Type"]) mapped["Type"] = "Expense";
-          return mapped;
-        });
+        }
+        if (!mapped["Type"]) mapped["Type"] = "Expense";
+        return mapped;
+      });
 
-        const configDoc = await getDoc(doc(db, 'families', familyId, 'settings', 'config'));
-        config = configDoc.exists() ? configDoc.data() : null;
-
-        familyDataCache.set(familyId, {
-          ts: Date.now(),
-          rows: data,
-          config,
-        });
-      }
+      const configDoc = await getDoc(doc(db, 'families', familyId, 'settings', 'config'));
+      config = configDoc.exists() ? configDoc.data() : null;
 
       setAllRows(data);
 
@@ -461,12 +433,9 @@ export function useExpenseData(options?: {
         });
 
         const cacheKey = `/api/families/${familyId}/expenses?${params.toString()}`;
-        const payload = await cachedFetch(cacheKey, LIST_CACHE_TTL, async () => {
-          const res = await fetch(cacheKey, { method: "GET", headers });
-          const data = await res.json();
-          if (!res.ok) throw new Error(data?.error || "Failed to fetch expenses.");
-          return data;
-        });
+        const res = await fetch(cacheKey, { method: "GET", headers });
+        const payload = await res.json();
+        if (!res.ok) throw new Error(payload?.error || "Failed to fetch expenses.");
 
         setServerRows(Array.isArray(payload?.rows) ? payload.rows : []);
         setServerTotalRows(Number(payload?.totalRows || 0));
