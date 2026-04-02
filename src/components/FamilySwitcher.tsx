@@ -50,8 +50,9 @@ export function FamilySwitcher() {
     });
   }
 
-  // Don't show if loading or only 1 family (system admins always see the switcher if there are families)
-  if (loading || families.length <= 1) return null;
+  // Don't show if loading or no families. System admins always see the switcher.
+  if (loading || families.length === 0) return null;
+  if (!isSystemAdmin && families.length <= 1) return null;
 
   return (
     <div className="relative">
