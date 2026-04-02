@@ -15,7 +15,6 @@ import {
   DialogActions,
   Switch,
   FormControlLabel,
-  Tooltip,
   MenuItem,
   Chip,
 } from '@mui/material';
@@ -24,31 +23,23 @@ import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import CloseIcon from '@mui/icons-material/Close';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
-import { db } from '@/lib/firebase';
-import { 
-  collection, 
-  getDocs, 
-  addDoc, 
-  updateDoc, 
-  deleteDoc, 
-  doc, 
-  query, 
-  where,
-  writeBatch
-} from 'firebase/firestore';
-import { 
-  Table, 
-  TableBody, 
-  TableCell, 
-  TableHead, 
-  TableHeader, 
-  TableRow 
+import { useAuthContext } from '@/components/AuthProvider';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow
 } from "@/components/NextAdmin/ui/table";
 import { cn } from "@/lib/NextAdmin/utils";
 import dayjs from 'dayjs';
 import { useToast } from '@/components/NextAdmin/ui/toast';
 import { LocalizationProvider, DatePicker } from '@mui/x-date-pickers';
 import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
+import { cachedFetch, cacheInvalidate } from '@/utils/clientCache';
+
+const INCOME_CONFIGS_CACHE_TTL = 30 * 60_000;
 
 interface IncomeConfig {
   id: string;
@@ -63,8 +54,8 @@ export default function IncomeTypesPage() {
   const [saving, setSaving] = useState(false);
   const [configs, setConfigs] = useState<IncomeConfig[]>([]);
   const { showToast } = useToast();
-  
-  // Dialog State
+  const { user, currentFamilyId, loading: authLoading } = useAuthContext();
+
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editItem, setEditItem] = useState<IncomeConfig | null>(null);
   const [formData, setFormData] = useState({
@@ -74,30 +65,56 @@ export default function IncomeTypesPage() {
     status: true
   });
 
-  // Monthly Process State
   const [processDialogOpen, setProcessDialogOpen] = useState(false);
   const [processType, setProcessType] = useState<'monthly' | 'yearly'>('monthly');
   const [processDate, setProcessDate] = useState<dayjs.Dayjs | null>(dayjs());
 
+  const getAuthHeaders = useCallback(async () => {
+    const token = await user?.getIdToken();
+    if (!token) throw new Error('Authentication token is missing.');
+    return {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    };
+  }, [user]);
+
   const fetchConfigs = useCallback(async () => {
+    if (authLoading) return;
+
     setLoading(true);
     try {
-      const snapshot = await getDocs(collection(db, 'income_configs'));
-      const data = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as IncomeConfig[];
-      setConfigs(data);
+      if (!currentFamilyId) {
+        setConfigs([]);
+        return;
+      }
+
+      const cacheKey = `income-configs:${currentFamilyId}`;
+      const configs = await cachedFetch<IncomeConfig[]>(cacheKey, INCOME_CONFIGS_CACHE_TTL, async () => {
+        const res = await fetch(`/api/families/${currentFamilyId}/income-configs`, {
+          method: 'GET',
+          headers: await getAuthHeaders(),
+        });
+        const payload = await res.json();
+        if (!res.ok) throw new Error(payload?.error || 'Failed to load income sources.');
+        return (payload?.configs || []) as IncomeConfig[];
+      });
+
+      setConfigs(configs);
     } catch (error) {
-      console.error("Error fetching income configs:", error);
+      console.error('Error fetching income configs:', error);
+      showToast('Failed to load income sources.', 'error');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [authLoading, currentFamilyId, getAuthHeaders, showToast]);
 
   useEffect(() => {
+    if (authLoading) {
+      setLoading(true);
+      return;
+    }
     fetchConfigs();
-  }, [fetchConfigs]);
+  }, [authLoading, fetchConfigs]);
 
   const openAddDialog = () => {
     setEditItem(null);
@@ -120,6 +137,8 @@ export default function IncomeTypesPage() {
     if (!formData.name || !formData.amount) return;
     setSaving(true);
     try {
+      if (!currentFamilyId) throw new Error('No familyId set');
+
       const data = {
         name: formData.name,
         amount: parseFloat(formData.amount),
@@ -128,28 +147,51 @@ export default function IncomeTypesPage() {
       };
 
       if (editItem) {
-        await updateDoc(doc(db, 'income_configs', editItem.id), data);
+        const res = await fetch(`/api/families/${currentFamilyId}/income-configs`, {
+          method: 'PUT',
+          headers: await getAuthHeaders(),
+          body: JSON.stringify({ id: editItem.id, ...data }),
+        });
+        const payload = await res.json();
+        if (!res.ok) throw new Error(payload?.error || 'Failed to update income source.');
       } else {
-        await addDoc(collection(db, 'income_configs'), data);
+        const res = await fetch(`/api/families/${currentFamilyId}/income-configs`, {
+          method: 'POST',
+          headers: await getAuthHeaders(),
+          body: JSON.stringify(data),
+        });
+        const payload = await res.json();
+        if (!res.ok) throw new Error(payload?.error || 'Failed to create income source.');
       }
+
+      cacheInvalidate(`income-configs:${currentFamilyId}`);
       await fetchConfigs();
-      showToast(editItem ? "Income source updated!" : "Income source created!", "success");
+      showToast(editItem ? 'Income source updated!' : 'Income source created!', 'success');
       setDialogOpen(false);
     } catch (error) {
-      showToast("Error saving: " + (error as any).message, "error");
+      showToast('Error saving: ' + (error as any).message, 'error');
     } finally {
       setSaving(false);
     }
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this income type?")) return;
+    if (!confirm('Are you sure you want to delete this income type?')) return;
     try {
-      await deleteDoc(doc(db, 'income_configs', id));
+      if (!currentFamilyId) throw new Error('No familyId set');
+
+      const res = await fetch(`/api/families/${currentFamilyId}/income-configs?id=${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers: await getAuthHeaders(),
+      });
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload?.error || 'Failed to delete income source.');
+
+      cacheInvalidate(`income-configs:${currentFamilyId}`);
       await fetchConfigs();
-      showToast("Income type deleted.", "success");
+      showToast('Income type deleted.', 'success');
     } catch (error) {
-      showToast("Error deleting: " + (error as any).message, "error");
+      showToast('Error deleting: ' + (error as any).message, 'error');
     }
   };
 
@@ -157,58 +199,25 @@ export default function IncomeTypesPage() {
     if (!processDate) return;
     setSaving(true);
     try {
-      const activeConfigs = configs.filter(c => c.status === 'active');
-      if (activeConfigs.length === 0) {
-        showToast("No active income types to process.", "warning");
-        return;
-      }
+      if (!currentFamilyId) throw new Error('No familyId set');
 
-      const expensesCol = collection(db, 'expenses');
-      let createdCount = 0;
-      let skippedCount = 0;
+      const res = await fetch(`/api/families/${currentFamilyId}/income-configs/process`, {
+        method: 'POST',
+        headers: await getAuthHeaders(),
+        body: JSON.stringify({
+          processType,
+          processDate: processDate.toISOString(),
+        }),
+      });
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload?.error || 'Failed to run automation.');
 
-      // Determine months to process
-      const monthsToProcess = processType === 'yearly' 
-        ? Array.from({ length: 12 }, (_, i) => i) 
-        : [processDate.month()];
-
-      for (const monthIdx of monthsToProcess) {
-        const currentTargetDate = processDate.month(monthIdx);
-        
-        for (const config of activeConfigs) {
-          const dateStr = currentTargetDate.date(config.dayOfMonth).format('YYYY-MM-DD');
-          
-          // DUPLICATION CHECK: Search for existing income with same Name and Date
-          const q = query(
-            expensesCol, 
-            where('Date', '==', dateStr),
-            where('Category', '==', config.name),
-            where('Type', '==', 'Income')
-          );
-          
-          const existing = await getDocs(q);
-          
-          if (existing.empty) {
-            await addDoc(expensesCol, {
-              Date: dateStr,
-              Type: 'Income',
-              Category: config.name,
-              Description: `Auto-Generated: ${config.name}`,
-              Amount: config.amount,
-              "Payment Method": 'Cash',
-              createdAt: new Date().toISOString()
-            });
-            createdCount++;
-          } else {
-            skippedCount++;
-          }
-        }
-      }
-
-      showToast(`Success! Created: ${createdCount}, Skipped: ${skippedCount}`, "success");
+      const createdCount = Number(payload?.createdCount || 0);
+      const skippedCount = Number(payload?.skippedCount || 0);
+      showToast(`Success! Created: ${createdCount}, Skipped: ${skippedCount}`, 'success');
       setProcessDialogOpen(false);
     } catch (error) {
-      showToast("Error processing: " + (error as any).message, "error");
+      showToast('Error processing: ' + (error as any).message, 'error');
     } finally {
       setSaving(false);
     }
@@ -221,7 +230,7 @@ export default function IncomeTypesPage() {
           <h1 className="text-heading-5 font-bold text-dark dark:text-white">Income Automation</h1>
           <p className="text-body-sm font-medium text-dark-5">Manage recurring income and bulk process records</p>
         </Box>
-        
+
         <Box className="flex gap-3">
           <Button
             variant="outlined"
@@ -275,10 +284,10 @@ export default function IncomeTypesPage() {
                     <TableCell className="px-6 py-4 font-bold text-success">${item.amount.toLocaleString()}</TableCell>
                     <TableCell className="px-6 py-4 text-center">{item.dayOfMonth}</TableCell>
                     <TableCell className="px-6 py-4">
-                      <Chip 
-                        label={item.status.toUpperCase()} 
-                        size="small" 
-                        className={cn("font-bold", item.status === 'active' ? "bg-green/10 text-green" : "bg-danger/10 text-danger")}
+                      <Chip
+                        label={item.status.toUpperCase()}
+                        size="small"
+                        className={cn('font-bold', item.status === 'active' ? 'bg-green/10 text-green' : 'bg-danger/10 text-danger')}
                       />
                     </TableCell>
                     <TableCell className="px-6 py-4 text-right">
@@ -293,47 +302,46 @@ export default function IncomeTypesPage() {
         </div>
       </Paper>
 
-      {/* Add/Edit Dialog */}
-      <Dialog 
-        open={dialogOpen} 
-        onClose={() => !saving && setDialogOpen(false)} 
-        maxWidth="sm" 
-        fullWidth 
-        PaperProps={{ 
-          sx: { 
+      <Dialog
+        open={dialogOpen}
+        onClose={() => !saving && setDialogOpen(false)}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{
+          sx: {
             borderRadius: '24px',
             boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
             backgroundImage: 'none',
           },
-          className: "dark:bg-gray-dark dark:border dark:border-dark-3"
+          className: 'dark:bg-gray-dark dark:border dark:border-dark-3'
         }}
       >
         <DialogTitle className="flex items-center justify-between border-b border-stroke p-6 dark:border-dark-3">
           <div className="flex items-center gap-4">
             <div className={cn(
-              "flex h-12 w-12 items-center justify-center rounded-2xl text-white shadow-lg",
-              editItem ? "bg-secondary shadow-secondary/20" : "bg-primary shadow-primary/20"
+              'flex h-12 w-12 items-center justify-center rounded-2xl text-white shadow-lg',
+              editItem ? 'bg-secondary shadow-secondary/20' : 'bg-primary shadow-primary/20'
             )}>
               {editItem ? <EditIcon /> : <AddIcon />}
             </div>
             <div>
               <h2 className="text-xl font-extrabold text-dark dark:text-white leading-tight">
-                {editItem ? "Edit Income Source" : "New Income Source"}
+                {editItem ? 'Edit Income Source' : 'New Income Source'}
               </h2>
               <p className="text-xs font-medium text-dark-5 mt-0.5">
-                {editItem ? "Update recurring income details" : "Configure a new monthly income stream"}
+                {editItem ? 'Update recurring income details' : 'Configure a new monthly income stream'}
               </p>
             </div>
           </div>
-          <IconButton 
-            onClick={() => setDialogOpen(false)} 
+          <IconButton
+            onClick={() => setDialogOpen(false)}
             size="small"
             className="rounded-xl bg-gray-2 text-dark-5 hover:bg-danger/10 hover:text-danger transition-all dark:bg-dark-2"
           >
             <CloseIcon fontSize="small" />
           </IconButton>
         </DialogTitle>
-        
+
         <DialogContent className="p-8 space-y-6 bg-gray-2/30 dark:bg-[#020D1A]/50">
           <div className="grid grid-cols-1 gap-6">
             <div className="space-y-2">
@@ -347,8 +355,8 @@ export default function IncomeTypesPage() {
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                 placeholder="e.g. Salary Husband"
                 variant="outlined"
-                sx={{ 
-                  '& .MuiOutlinedInput-root': { 
+                sx={{
+                  '& .MuiOutlinedInput-root': {
                     borderRadius: '16px',
                     backgroundColor: 'var(--color-background)',
                     '& fieldset': { borderColor: 'var(--color-stroke)' },
@@ -357,7 +365,7 @@ export default function IncomeTypesPage() {
                 }}
               />
             </div>
-            
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
               <div className="space-y-2">
                 <label className="text-[11px] font-bold uppercase tracking-wider text-dark-5 dark:text-dark-6 ml-1">
@@ -373,8 +381,8 @@ export default function IncomeTypesPage() {
                   InputProps={{
                     startAdornment: <Typography className="mr-2 text-dark-5 font-bold">$</Typography>
                   }}
-                  sx={{ 
-                    '& .MuiOutlinedInput-root': { 
+                  sx={{
+                    '& .MuiOutlinedInput-root': {
                       borderRadius: '16px',
                       backgroundColor: 'var(--color-background)',
                       '& fieldset': { borderColor: 'var(--color-stroke)' },
@@ -391,8 +399,8 @@ export default function IncomeTypesPage() {
                   fullWidth
                   value={formData.dayOfMonth}
                   onChange={(e) => setFormData({ ...formData, dayOfMonth: parseInt(e.target.value as string) })}
-                  sx={{ 
-                    '& .MuiOutlinedInput-root': { 
+                  sx={{
+                    '& .MuiOutlinedInput-root': {
                       borderRadius: '16px',
                       backgroundColor: 'var(--color-background)',
                       '& fieldset': { borderColor: 'var(--color-stroke)' },
@@ -413,8 +421,8 @@ export default function IncomeTypesPage() {
               </div>
               <FormControlLabel
                 control={
-                  <Switch 
-                    checked={formData.status} 
+                  <Switch
+                    checked={formData.status}
                     onChange={(e) => setFormData({ ...formData, status: e.target.checked })}
                     color="primary"
                     sx={{
@@ -425,8 +433,8 @@ export default function IncomeTypesPage() {
                 }
                 label={
                   <Typography className={cn(
-                    "text-xs font-black uppercase tracking-tighter",
-                    formData.status ? "text-primary" : "text-danger"
+                    'text-xs font-black uppercase tracking-tighter',
+                    formData.status ? 'text-primary' : 'text-danger'
                   )}>
                     {formData.status ? 'Active' : 'Inactive'}
                   </Typography>
@@ -437,18 +445,18 @@ export default function IncomeTypesPage() {
             </div>
           </div>
         </DialogContent>
-        
+
         <DialogActions className="p-6 border-t border-stroke dark:border-dark-3 bg-white dark:bg-gray-dark">
-          <button 
-            onClick={() => setDialogOpen(false)} 
-            disabled={saving} 
+          <button
+            onClick={() => setDialogOpen(false)}
+            disabled={saving}
             className="px-6 py-3 text-sm font-bold text-dark-4 hover:text-dark transition-colors mr-2 dark:text-dark-6 dark:hover:text-white"
           >
             Cancel
           </button>
-          <Button 
-            variant="contained" 
-            onClick={handleSave} 
+          <Button
+            variant="contained"
+            onClick={handleSave}
             disabled={saving}
             sx={{
               bgcolor: '#006BFF',
@@ -459,7 +467,7 @@ export default function IncomeTypesPage() {
               textTransform: 'none',
               fontSize: '0.875rem',
               boxShadow: '0 10px 15px -3px rgba(0, 107, 255, 0.2)',
-              '&:hover': { 
+              '&:hover': {
                 bgcolor: '#0052CC',
                 boxShadow: '0 20px 25px -5px rgba(0, 107, 255, 0.3)'
               },
@@ -471,22 +479,21 @@ export default function IncomeTypesPage() {
         </DialogActions>
       </Dialog>
 
-      {/* Process Dialog */}
-      <Dialog 
-        open={processDialogOpen} 
-        onClose={() => !saving && setProcessDialogOpen(false)} 
-        maxWidth="xs" 
-        fullWidth 
-        PaperProps={{ 
+      <Dialog
+        open={processDialogOpen}
+        onClose={() => !saving && setProcessDialogOpen(false)}
+        maxWidth="xs"
+        fullWidth
+        PaperProps={{
           sx: { borderRadius: '24px' },
-          className: "dark:bg-gray-dark dark:border dark:border-dark-3"
+          className: 'dark:bg-gray-dark dark:border dark:border-dark-3'
         }}
       >
         <DialogTitle className="font-bold border-b border-stroke p-6 dark:border-dark-3">
           <div className="flex items-center gap-3">
             <div className={cn(
-              "flex h-10 w-10 items-center justify-center rounded-xl text-white shadow-lg",
-              processType === 'yearly' ? "bg-secondary shadow-secondary/20" : "bg-success shadow-success/20"
+              'flex h-10 w-10 items-center justify-center rounded-xl text-white shadow-lg',
+              processType === 'yearly' ? 'bg-secondary shadow-secondary/20' : 'bg-success shadow-success/20'
             )}>
               <PlayArrowIcon />
             </div>
@@ -497,39 +504,39 @@ export default function IncomeTypesPage() {
         </DialogTitle>
         <DialogContent className="p-6 pt-8">
           <Typography variant="body2" color="text.secondary" mb={4}>
-            {processType === 'yearly' 
-              ? `Select a year. The system will generate income records for all 12 months. It will automatically skip any records that already exist.`
-              : `Select a month. The system will generate income records for that month and skip any duplicates.`}
+            {processType === 'yearly'
+              ? 'Select a year. The system will generate income records for all 12 months. It will automatically skip any records that already exist.'
+              : 'Select a month. The system will generate income records for that month and skip any duplicates.'}
           </Typography>
           <LocalizationProvider dateAdapter={AdapterDayjs}>
             <DatePicker
-              label={processType === 'yearly' ? "Select Year" : "Select Month & Year"}
+              label={processType === 'yearly' ? 'Select Year' : 'Select Month & Year'}
               views={processType === 'yearly' ? ['year'] : ['year', 'month']}
               value={processDate}
               onChange={(newValue) => setProcessDate(newValue)}
-              slotProps={{ 
-                textField: { 
+              slotProps={{
+                textField: {
                   fullWidth: true,
                   sx: { '& .MuiOutlinedInput-root': { borderRadius: '16px' } }
-                } 
+                }
               }}
             />
           </LocalizationProvider>
         </DialogContent>
         <DialogActions className="p-6 border-t border-stroke dark:border-dark-3">
           <button onClick={() => setProcessDialogOpen(false)} className="text-sm font-bold text-dark-4 mr-4">Cancel</button>
-          <Button 
-            variant="contained" 
-            onClick={handleRunProcess} 
-            disabled={saving} 
-            sx={{ 
-              bgcolor: processType === 'yearly' ? '#7C3AED' : '#10B981', 
-              borderRadius: '12px', 
+          <Button
+            variant="contained"
+            onClick={handleRunProcess}
+            disabled={saving}
+            sx={{
+              bgcolor: processType === 'yearly' ? '#7C3AED' : '#10B981',
+              borderRadius: '12px',
               fontWeight: 'bold',
               '&:hover': { bgcolor: processType === 'yearly' ? '#6D28D9' : '#059669' }
             }}
           >
-            {saving ? <CircularProgress size={20} color="inherit" /> : "Run Automation"}
+            {saving ? <CircularProgress size={20} color="inherit" /> : 'Run Automation'}
           </Button>
         </DialogActions>
       </Dialog>

@@ -26,6 +26,7 @@ import {
 } from "@/components/NextAdmin/Dashboard/overview-cards/icons";
 import { DatePicker, LocalizationProvider } from "@mui/x-date-pickers";
 import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
+import { useAuthContext } from "@/components/AuthProvider";
 
 export default function MonthlyReportCashPage() {
   const [stats, setStats] = useState<any>(null);
@@ -36,6 +37,7 @@ export default function MonthlyReportCashPage() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('active');
   const [dateFilter, setDateFilter] = useState<string | null>(null);
+  const { currentFamilyId, loading: authLoading } = useAuthContext();
 
   const months = useMemo(() => [
     "January", "February", "March", "April", "May", "June",
@@ -45,12 +47,18 @@ export default function MonthlyReportCashPage() {
 
   useEffect(() => {
     async function loadReport() {
+      if (authLoading) return;
       setLoading(true);
       try {
+        if (!currentFamilyId) {
+          setStats(null);
+          return;
+        }
         const data = await getClearPortStats(month, year, {
           paymentMethodFilter: "Cash",
           currencyFilter: currency,
-          statusFilter: statusFilter
+          statusFilter: statusFilter,
+          familyId: currentFamilyId,
         });
         setStats(data);
       } catch (error) {
@@ -60,7 +68,7 @@ export default function MonthlyReportCashPage() {
       }
     }
     loadReport();
-  }, [month, year, currency, statusFilter]);
+  }, [month, year, currency, statusFilter, currentFamilyId, authLoading]);
 
   const filteredTransactions = useMemo(() => {
     if (!stats?.monthlyTransactionsList) return [];
@@ -89,15 +97,15 @@ export default function MonthlyReportCashPage() {
   }, [stats, selectedIds]);
 
   const handleExportExcel = async () => {
-    const dataToExport = selectedIds.length > 0 
+    const dataToExport = selectedIds.length > 0
       ? stats.monthlyTransactionsList.filter((r: any) => selectedIds.includes(r.id))
       : filteredTransactions;
-    
+
     await generateExcel("Cash Financial Report", ["Date", "Description", "Payment Method", "Category", "Type", "Currency", "Debit", "Credit"], dataToExport, "Cash");
   };
 
   const handleExportPdf = () => {
-    const dataToExport = selectedIds.length > 0 
+    const dataToExport = selectedIds.length > 0
       ? stats.monthlyTransactionsList.filter((r: any) => selectedIds.includes(r.id))
       : filteredTransactions;
 
@@ -132,7 +140,17 @@ export default function MonthlyReportCashPage() {
     );
   }
 
-  const netSavings = stats.monthlyIncome - stats.monthlyAmount;
+  // Compute closing balance from the full transaction list (includes future-dated entries)
+  // so it matches the server API which counts all transactions in the month.
+  const { totalMonthlyIncome, totalMonthlyExpense } = (stats.monthlyTransactionsList as any[] ?? []).reduce(
+    (acc: { totalMonthlyIncome: number; totalMonthlyExpense: number }, item: any) => {
+      if (item.Type === 'Income') acc.totalMonthlyIncome += item.Amount;
+      else acc.totalMonthlyExpense += item.Amount;
+      return acc;
+    },
+    { totalMonthlyIncome: 0, totalMonthlyExpense: 0 }
+  );
+  const netSavings = totalMonthlyIncome - totalMonthlyExpense;
   const currentCashBalance = (stats.startingBalance || 0) + netSavings;
   const symbol = currency === "USD" ? "$" : "៛";
   const fractionDigits = currency === "USD" ? 2 : 0;
@@ -247,39 +265,39 @@ export default function MonthlyReportCashPage() {
         </div>
 
         {/* Closing Balance */}
+        <OverviewCard
+          label="Final Cash Position"
+          data={{
+            value: `${symbol}${currentCashBalance.toLocaleString(undefined, { minimumFractionDigits: fractionDigits })}`,
+            growthRate: 0
+          }}
+          Icon={BalanceIcon}
+          gradient="dark"
+        />
+      </div>
+
+      {dateFilter && (
+        <div className="grid gap-4 sm:grid-cols-2 animate-fade-in">
           <OverviewCard
-            label="Final Cash Position"
+            label={`Total Debit (${dayjs(dateFilter).format('DD MMM')})`}
             data={{
-              value: `${symbol}${currentCashBalance.toLocaleString(undefined, { minimumFractionDigits: fractionDigits })}`,
+              value: `${symbol}${dailyStats.debit.toLocaleString(undefined, { minimumFractionDigits: fractionDigits })}`,
               growthRate: 0
             }}
-            Icon={BalanceIcon}
-            gradient="dark"
+            Icon={IncomeIcon}
+            gradient="green"
+          />
+          <OverviewCard
+            label={`Total Credit (${dayjs(dateFilter).format('DD MMM')})`}
+            data={{
+              value: `${symbol}${dailyStats.credit.toLocaleString(undefined, { minimumFractionDigits: fractionDigits })}`,
+              growthRate: 0
+            }}
+            Icon={ExpenseIcon}
+            gradient="red"
           />
         </div>
-
-        {dateFilter && (
-          <div className="grid gap-4 sm:grid-cols-2 animate-fade-in">
-            <OverviewCard
-              label={`Total Debit (${dayjs(dateFilter).format('DD MMM')})`}
-              data={{ 
-                value: `${symbol}${dailyStats.debit.toLocaleString(undefined, { minimumFractionDigits: fractionDigits })}`, 
-                growthRate: 0 
-              }}
-              Icon={IncomeIcon}
-              gradient="green"
-            />
-            <OverviewCard
-              label={`Total Credit (${dayjs(dateFilter).format('DD MMM')})`}
-              data={{ 
-                value: `${symbol}${dailyStats.credit.toLocaleString(undefined, { minimumFractionDigits: fractionDigits })}`, 
-                growthRate: 0 
-              }}
-              Icon={ExpenseIcon}
-              gradient="red"
-            />
-          </div>
-        )}
+      )}
 
       {/* --- Main Report Section --- */}
       <div className="overflow-hidden rounded-[32px] border border-stroke bg-white/50 backdrop-blur-md shadow-2xl dark:border-white/5 dark:bg-dark-2/50">
@@ -297,7 +315,7 @@ export default function MonthlyReportCashPage() {
               />
             </LocalizationProvider>
             {dateFilter && (
-              <button 
+              <button
                 onClick={() => setDateFilter(null)}
                 className="text-xs font-bold text-danger hover:underline"
               >
@@ -384,50 +402,50 @@ export default function MonthlyReportCashPage() {
                 </TableRow>
               )}
 
-                              {(() => {
-                                let runningBalance = stats.startingBalance || 0;
-                                // If we filter by date, the running balance should ideally start from the balance *before* that date.
-                                // For simplicity, we'll show the monthly running balance logic but only display filtered rows.
-                                
-                                return stats.monthlyTransactionsList?.map((item: any, idx: number) => {
-                                  const isIncome = item.Type === "Income";
-                                  isIncome ? runningBalance += item.Amount : runningBalance -= item.Amount;
-                                  
-                                  if (dateFilter && item.Date !== dateFilter) return null;
-                                  
-                                  const isSelected = selectedIds.includes(item.id);
-              
-                                  return (
-                                    <TableRow 
-                                      key={idx} 
-                                      className={cn(
-                                        "hover:bg-gray-50/50 dark:hover:bg-white/5 transition-colors cursor-pointer", 
-                                        isSelected ? "bg-success/5 dark:bg-success/10" : "",
-                                        item.isFuture && "opacity-40 grayscale italic"
-                                      )}
-                                      onClick={() => handleSelectRow(item.id, !isSelected)}
-                                    >
-                                      <TableCell className="px-6" onClick={(e) => e.stopPropagation()}>
-                                        <Checkbox
-                                          size="small"
-                                          checked={isSelected}
-                                          onChange={(e) => handleSelectRow(item.id, e.target.checked)}
-                                        />
-                                      </TableCell>
-                                      <TableCell className="px-0 text-xs text-gray-500">{dayjs(item.Date).format('DD MMM')}</TableCell>
-                                      <TableCell>
-                                        <div className="flex flex-col">
-                                          <span className="text-xs font-bold">{item.Description}</span>
-                                          <span className="text-[9px] uppercase font-black text-gray-400">{item.Category}</span>
-                                        </div>
-                                      </TableCell>
-                                      <TableCell className="text-right text-xs font-bold text-emerald-500">{isIncome ? `+${symbol}${item.Amount.toLocaleString(undefined, { minimumFractionDigits: fractionDigits })}` : ""}</TableCell>
-                                      <TableCell className="text-right text-xs font-bold text-rose-500">{!isIncome ? `-${symbol}${item.Amount.toLocaleString(undefined, { minimumFractionDigits: fractionDigits })}` : ""}</TableCell>
-                                      <TableCell className="text-right px-6 text-xs font-black">{symbol}{runningBalance.toLocaleString(undefined, { minimumFractionDigits: fractionDigits })}</TableCell>
-                                    </TableRow>
-                                  );
-                                });
-                              })()}
+              {(() => {
+                let runningBalance = stats.startingBalance || 0;
+                // If we filter by date, the running balance should ideally start from the balance *before* that date.
+                // For simplicity, we'll show the monthly running balance logic but only display filtered rows.
+
+                return stats.monthlyTransactionsList?.map((item: any, idx: number) => {
+                  const isIncome = item.Type === "Income";
+                  isIncome ? runningBalance += item.Amount : runningBalance -= item.Amount;
+
+                  if (dateFilter && item.Date !== dateFilter) return null;
+
+                  const isSelected = selectedIds.includes(item.id);
+
+                  return (
+                    <TableRow
+                      key={idx}
+                      className={cn(
+                        "hover:bg-gray-50/50 dark:hover:bg-white/5 transition-colors cursor-pointer",
+                        isSelected ? "bg-success/5 dark:bg-success/10" : "",
+                        item.isFuture && "opacity-40 grayscale italic"
+                      )}
+                      onClick={() => handleSelectRow(item.id, !isSelected)}
+                    >
+                      <TableCell className="px-6" onClick={(e) => e.stopPropagation()}>
+                        <Checkbox
+                          size="small"
+                          checked={isSelected}
+                          onChange={(e) => handleSelectRow(item.id, e.target.checked)}
+                        />
+                      </TableCell>
+                      <TableCell className="px-0 text-xs text-gray-500">{dayjs(item.Date).format('DD MMM')}</TableCell>
+                      <TableCell>
+                        <div className="flex flex-col">
+                          <span className="text-xs font-bold">{item.Description}</span>
+                          <span className="text-[9px] uppercase font-black text-gray-400">{item.Category}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right text-xs font-bold text-emerald-500">{isIncome ? `+${symbol}${item.Amount.toLocaleString(undefined, { minimumFractionDigits: fractionDigits })}` : ""}</TableCell>
+                      <TableCell className="text-right text-xs font-bold text-rose-500">{!isIncome ? `-${symbol}${item.Amount.toLocaleString(undefined, { minimumFractionDigits: fractionDigits })}` : ""}</TableCell>
+                      <TableCell className="text-right px-6 text-xs font-black">{symbol}{runningBalance.toLocaleString(undefined, { minimumFractionDigits: fractionDigits })}</TableCell>
+                    </TableRow>
+                  );
+                });
+              })()}
             </TableBody>
           </Table>
         </div>

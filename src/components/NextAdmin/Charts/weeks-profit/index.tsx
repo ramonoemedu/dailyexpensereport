@@ -5,6 +5,7 @@ import { getWeeksProfitData } from "@/services/charts.services";
 import { WeeksProfitChart } from "./chart";
 import { useEffect, useState } from "react";
 import { Skeleton } from "@mui/material";
+import { useAuthContext } from "@/components/AuthProvider";
 
 type PropsType = {
   month?: number;
@@ -15,22 +16,30 @@ type PropsType = {
 export function WeeksProfit({ className, month: propMonth, year: propYear }: PropsType) {
   const [internalMonth, setInternalMonth] = useState(new Date().getMonth());
   const [internalYear, setInternalYear] = useState(new Date().getFullYear());
-  
+
   const month = propMonth !== undefined ? propMonth : internalMonth;
   const year = propYear !== undefined ? propYear : internalYear;
 
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const { currentFamilyId } = useAuthContext();
 
   useEffect(() => {
     async function loadData() {
       setLoading(true);
-      const result = await getWeeksProfitData(month, year);
-      setData(result);
-      setLoading(false);
+      try {
+        if (!currentFamilyId) {
+          setData({ sales: [], revenue: [] });
+          return;
+        }
+        const result = await getWeeksProfitData(month, year, currentFamilyId);
+        setData(result);
+      } finally {
+        setLoading(false);
+      }
     }
     loadData();
-  }, [month, year]);
+  }, [month, year, currentFamilyId]);
 
   if (loading || !data) {
     return (
@@ -57,15 +66,15 @@ export function WeeksProfit({ className, month: propMonth, year: propYear }: Pro
         </h2>
 
         <div className="flex items-center gap-2">
-          <select 
-            value={month} 
+          <select
+            value={month}
             onChange={(e) => setInternalMonth(parseInt(e.target.value))}
             className="rounded-lg border border-stroke bg-transparent px-3 py-1.5 text-xs font-medium outline-none focus:border-primary dark:border-dark-3 dark:bg-dark-2"
           >
             {months.map((m, i) => <option key={m} value={i}>{m}</option>)}
           </select>
-          <select 
-            value={year} 
+          <select
+            value={year}
             onChange={(e) => setInternalYear(parseInt(e.target.value))}
             className="rounded-lg border border-stroke bg-transparent px-3 py-1.5 text-xs font-medium outline-none focus:border-primary dark:border-dark-3 dark:bg-dark-2"
           >

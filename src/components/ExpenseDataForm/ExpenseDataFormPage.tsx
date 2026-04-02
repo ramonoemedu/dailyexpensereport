@@ -110,15 +110,15 @@ const ExpenseDataFormPage: React.FC<Props> = ({
   }, [rows, selectedIds]);
 
   const handleExportExcel = async () => {
-    const dataToExport = selectedIds.length > 0 
+    const dataToExport = selectedIds.length > 0
       ? rows.filter(r => selectedIds.includes(r.id as string))
       : rows;
-    
+
     await generateExcel("Daily Expense Report", columns, dataToExport, bankName);
   };
 
   const handleExportPdf = () => {
-    const dataToExport = selectedIds.length > 0 
+    const dataToExport = selectedIds.length > 0
       ? rows.filter(r => selectedIds.includes(r.id as string))
       : rows;
 
@@ -231,20 +231,20 @@ const ExpenseDataFormPage: React.FC<Props> = ({
 
       {!selectedIds.length && (
         <div className="flex justify-end gap-3 mb-2">
-            <button
-              onClick={handleExportExcel}
-              className="flex items-center gap-2 rounded-xl border border-stroke bg-white px-4 py-2 text-sm font-bold text-dark-4 transition-all hover:bg-gray-2 dark:border-dark-3 dark:bg-gray-dark dark:text-white dark:hover:bg-dark-2"
-            >
-              <FileDownloadIcon fontSize="small" />
-              Export Excel
-            </button>
-            <button
-              onClick={handleExportPdf}
-              className="flex items-center gap-2 rounded-xl border border-stroke bg-white px-4 py-2 text-sm font-bold text-dark-4 transition-all hover:bg-gray-2 dark:border-dark-3 dark:bg-gray-dark dark:text-white dark:hover:bg-dark-2"
-            >
-              <PictureAsPdfIcon fontSize="small" />
-              Export PDF
-            </button>
+          <button
+            onClick={handleExportExcel}
+            className="flex items-center gap-2 rounded-xl border border-stroke bg-white px-4 py-2 text-sm font-bold text-dark-4 transition-all hover:bg-gray-2 dark:border-dark-3 dark:bg-gray-dark dark:text-white dark:hover:bg-dark-2"
+          >
+            <FileDownloadIcon fontSize="small" />
+            Export Excel
+          </button>
+          <button
+            onClick={handleExportPdf}
+            className="flex items-center gap-2 rounded-xl border border-stroke bg-white px-4 py-2 text-sm font-bold text-dark-4 transition-all hover:bg-gray-2 dark:border-dark-3 dark:bg-gray-dark dark:text-white dark:hover:bg-dark-2"
+          >
+            <PictureAsPdfIcon fontSize="small" />
+            Export PDF
+          </button>
         </div>
       )}
 
@@ -259,7 +259,7 @@ const ExpenseDataFormPage: React.FC<Props> = ({
         onSelectionChange={setSelectedIds}
       />
 
-      <Tooltip title="Add Entry">
+      {/* <Tooltip title="Add Entry">
         <Fab
           color="primary"
           sx={{
@@ -275,7 +275,7 @@ const ExpenseDataFormPage: React.FC<Props> = ({
         >
           <AddIcon />
         </Fab>
-      </Tooltip>
+      </Tooltip> */}
 
       <Dialog
         open={dialogOpen}

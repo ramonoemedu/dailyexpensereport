@@ -60,7 +60,8 @@ export default function DailyExpenseBankPage() {
   } = useExpenseData({
     paymentMethodFilter: [bankName],
     balanceType: 'bank',
-    bankId: bankId
+    bankId: bankId,
+    useServerPagination: true,
   });
   const { showToast } = useToast();
   const { confirm, isOpen: isConfirmOpen, options: confirmOptions, handleConfirm, handleCancel } = useConfirm();
@@ -250,10 +251,10 @@ export default function DailyExpenseBankPage() {
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <h1 className="text-heading-5 font-bold text-dark dark:text-white">
-              Daily Expense Report ({bankName})
+              Daily Expense Report Bank
             </h1>
             <p className="text-body-sm font-medium text-dark-5">
-              Manage and track daily {bankName} expenses
+              Manage and track daily expenses
             </p>
           </div>
 
@@ -459,7 +460,6 @@ export default function DailyExpenseBankPage() {
                     page={page}
                     onChange={(_, value) => {
                       setPage(value);
-                      fetchRows(value);
                     }}
                     color="primary"
                     shape="rounded"

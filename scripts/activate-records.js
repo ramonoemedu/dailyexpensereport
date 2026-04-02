@@ -10,31 +10,51 @@ const db = admin.firestore();
 
 async function activateAllInactiveRecords() {
   try {
-    console.log('Fetching all expenses...');
-    const snapshot = await db.collection('expenses').get();
-    
+    console.log('Fetching all family expense records...');
+    const familiesSnapshot = await db.collection('families').get();
+
     let inactiveCount = 0;
     let activatedCount = 0;
-    const batch = db.batch();
-    
-    snapshot.docs.forEach(doc => {
-      const data = doc.data();
-      if (data.status === 'inactive') {
+    let batch = db.batch();
+    let batchOps = 0;
+
+    for (const familyDoc of familiesSnapshot.docs) {
+      const familyId = familyDoc.id;
+      const expensesSnapshot = await db
+        .collection('families')
+        .doc(familyId)
+        .collection('expenses')
+        .where('status', '==', 'inactive')
+        .get();
+
+      for (const expenseDoc of expensesSnapshot.docs) {
+        const data = expenseDoc.data();
         inactiveCount++;
-        console.log(`Found inactive record: ${doc.id} - ${data.Description || 'No description'} - Date: ${data.Date}`);
-        batch.update(doc.ref, { status: 'active' });
+        console.log(`Found inactive record: family=${familyId} id=${expenseDoc.id} - ${data.Description || 'No description'} - Date: ${data.Date}`);
+        batch.update(expenseDoc.ref, { status: 'active' });
         activatedCount++;
+        batchOps++;
+
+        if (batchOps === 500) {
+          // Firestore batches have a hard limit of 500 operations.
+          await batch.commit();
+          batch = db.batch();
+          batchOps = 0;
+        }
       }
-    });
-    
-    if (activatedCount > 0) {
-      console.log(`\nActivating ${activatedCount} inactive records...`);
-      await batch.commit();
-      console.log(`✅ Successfully activated ${activatedCount} records!`);
-    } else {
-      console.log('No inactive records found.');
     }
-    
+
+    if (batchOps > 0) {
+      await batch.commit();
+    }
+
+    if (activatedCount > 0) {
+      console.log(`\nSuccessfully activated ${activatedCount} records.`);
+    } else {
+      console.log('No inactive records found in family expenses.');
+    }
+
+    console.log(`Total inactive found: ${inactiveCount}`);
     process.exit(0);
   } catch (error) {
     console.error('Error:', error);

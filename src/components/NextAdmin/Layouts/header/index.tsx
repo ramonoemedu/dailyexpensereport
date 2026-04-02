@@ -7,6 +7,7 @@ import { useSidebarContext } from "../sidebar/sidebar-context";
 import { MenuIcon } from "./icons";
 import { ThemeToggleSwitch } from "./theme-toggle";
 import { UserInfo } from "./user-info";
+import { FamilySwitcher } from "@/components/FamilySwitcher";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/NextAdmin/utils";
 
@@ -18,8 +19,10 @@ export function Header() {
     if (pathname === "/") return "Dashboard";
     const parts = pathname.split("/").filter(Boolean);
     if (parts.length === 0) return "Dashboard";
+    const lastPart = parts[parts.length - 1];
+    if (["chip-mong", "acleda", "all-banks"].includes(lastPart)) return "Bank";
     // Taking the last part and cleaning it up
-    return parts[parts.length - 1]
+    return lastPart
       .split("-")
       .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
       .join(" ");
@@ -81,6 +84,8 @@ export function Header() {
         </div>
 
         <div className="flex items-center gap-2 md:gap-4 border-l border-gray-200/50 dark:border-white/5 pl-2 md:pl-6">
+          <FamilySwitcher />
+
           <ThemeToggleSwitch />
 
           <div className="h-8 w-px bg-gray-200/50 dark:bg-white/5" />

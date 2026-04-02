@@ -1,6 +1,6 @@
 // Script to activate all inactive records in Firebase using the client SDK
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, getDocs, updateDoc, doc, writeBatch } from 'firebase/firestore';
+import { getFirestore, collection, getDocs, doc, writeBatch, query, where } from 'firebase/firestore';
 
 const firebaseConfig = {
   apiKey: "AIzaSyAc6VfX2_Mx2j4X9hdp5ZtAkH2-VkyBdLM",
@@ -17,29 +17,37 @@ const db = getFirestore(app);
 
 async function activateAllInactiveRecords() {
   try {
-    console.log('Fetching all expenses...');
-    const snapshot = await getDocs(collection(db, 'expenses'));
+    console.log('Fetching all family expense records...');
+    const familiesSnapshot = await getDocs(collection(db, 'families'));
     
     let inactiveCount = 0;
     const inactiveRecords = [];
-    
-    snapshot.docs.forEach(docSnapshot => {
-      const data = docSnapshot.data();
-      if (data.status === 'inactive') {
+
+    for (const familyDoc of familiesSnapshot.docs) {
+      const familyId = familyDoc.id;
+      const expensesQ = query(
+        collection(db, 'families', familyId, 'expenses'),
+        where('status', '==', 'inactive')
+      );
+      const expensesSnapshot = await getDocs(expensesQ);
+
+      expensesSnapshot.docs.forEach(docSnapshot => {
+        const data = docSnapshot.data();
         inactiveCount++;
         inactiveRecords.push({
           id: docSnapshot.id,
+          familyId,
           description: data.Description || 'No description',
           date: data.Date,
           paymentMethod: data.Payment_Method || data['Payment Method'] || 'N/A',
           amount: data.Amount || 0
         });
-      }
-    });
+      });
+    }
     
     console.log(`\nFound ${inactiveCount} inactive records:`);
     inactiveRecords.forEach(record => {
-      console.log(`  - ${record.date}: $${record.amount} - ${record.paymentMethod} - ${record.description.substring(0, 50)}`);
+      console.log(`  - family=${record.familyId} ${record.date}: $${record.amount} - ${record.paymentMethod} - ${record.description.substring(0, 50)}`);
     });
     
     if (inactiveCount > 0) {
@@ -52,7 +60,7 @@ async function activateAllInactiveRecords() {
         const batchRecords = inactiveRecords.slice(i, Math.min(i + batchSize, inactiveRecords.length));
         
         batchRecords.forEach(record => {
-          const docRef = doc(db, 'expenses', record.id);
+          const docRef = doc(db, 'families', record.familyId, 'expenses', record.id);
           batch.update(docRef, { status: 'active' });
         });
         

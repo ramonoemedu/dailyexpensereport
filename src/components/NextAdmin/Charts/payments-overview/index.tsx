@@ -8,6 +8,7 @@ import { cn } from "@/lib/NextAdmin/utils";
 import type { ApexOptions } from "apexcharts";
 import dynamic from "next/dynamic";
 import { useTheme } from "next-themes";
+import { useAuthContext } from "@/components/AuthProvider";
 
 const Chart = dynamic(() => import("react-apexcharts"), { ssr: false });
 
@@ -22,6 +23,7 @@ export function PaymentsOverview({ year: propYear, className }: PropsType) {
   const { resolvedTheme } = useTheme();
   const isMobile = useIsMobile();
   const isDark = resolvedTheme === "dark";
+  const { currentFamilyId } = useAuthContext();
 
   // Use the year passed via props, or default to current year
   const year = propYear || new Date().getFullYear();
@@ -30,7 +32,11 @@ export function PaymentsOverview({ year: propYear, className }: PropsType) {
     async function loadData() {
       setLoading(true);
       try {
-        const result = await getPaymentsOverviewData(year);
+        if (!currentFamilyId) {
+          setData({ income: [], expense: [] });
+          return;
+        }
+        const result = await getPaymentsOverviewData(year, currentFamilyId);
         setData(result);
       } catch (error) {
         console.error("Failed to load payments data:", error);
@@ -39,7 +45,7 @@ export function PaymentsOverview({ year: propYear, className }: PropsType) {
       }
     }
     loadData();
-  }, [year]);
+  }, [year, currentFamilyId]);
 
   const options: ApexOptions = {
     colors: ["#10B981", "#EF4444"], // Emerald (Income) & Rose (Expense)

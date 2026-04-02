@@ -19,27 +19,23 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import CloseIcon from '@mui/icons-material/Close';
-import { db } from '@/lib/firebase';
-import { 
-  collection, 
-  getDocs, 
-  setDoc, 
-  deleteDoc, 
-  doc 
-} from 'firebase/firestore';
-import { 
-  Table, 
-  TableBody, 
-  TableCell, 
-  TableHead, 
-  TableHeader, 
-  TableRow 
+import { useAuthContext } from '@/components/AuthProvider';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow
 } from "@/components/NextAdmin/ui/table";
 import { cn } from "@/lib/NextAdmin/utils";
 import dayjs from 'dayjs';
 import { useToast } from '@/components/NextAdmin/ui/toast';
 import { ConfirmationDialog } from '@/components/NextAdmin/ui/ConfirmationDialog';
 import { useConfirm } from '@/hooks/NextAdmin/useConfirm';
+import { cachedFetch, cacheInvalidate } from '@/utils/clientCache';
+
+const CASH_BALANCE_CACHE_TTL = 30 * 60_000;
 
 interface BalanceRecord {
   id: string;
@@ -55,7 +51,7 @@ export default function CashStartingBalancePage() {
   const [balances, setBalances] = useState<BalanceRecord[]>([]);
   const { showToast } = useToast();
   const { confirm, isOpen: isConfirmOpen, options: confirmOptions, handleConfirm, handleCancel } = useConfirm();
-  
+
   // Dialog State
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editItem, setEditItem] = useState<BalanceRecord | null>(null);
@@ -68,44 +64,65 @@ export default function CashStartingBalancePage() {
 
   const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
   const years = [2024, 2025, 2026];
+  const { user, currentFamilyId, loading: authLoading } = useAuthContext();
+
+  const getAuthHeaders = useCallback(async () => {
+    const token = await user?.getIdToken();
+    if (!token) throw new Error('Authentication token is missing.');
+    return {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    };
+  }, [user]);
 
   const fetchBalances = useCallback(async () => {
+    if (authLoading) {
+      setLoading(true);
+      return;
+    }
+
     setLoading(true);
     try {
-      const snapshot = await getDocs(collection(db, 'settings'));
-      const data = snapshot.docs
-        .filter(d => d.id.startsWith('cash_balance_'))
-        .map(d => {
-          const parts = d.id.split('_');
-          // parts will be ['cash', 'balance', 'YYYY', 'MM']
-          return {
-            id: d.id,
-            year: parseInt(parts[2]),
-            month: parseInt(parts[3]),
-            amount: d.data().amount || 0,
-            amountKHR: d.data().amountKHR || 0
-          };
-        })
-        .sort((a, b) => (b.year * 12 + b.month) - (a.year * 12 + a.month));
-      setBalances(data);
+      if (!currentFamilyId) {
+        setBalances([]);
+        return;
+      }
+
+      const cacheKey = `cash-balances:${currentFamilyId}`;
+      const balances = await cachedFetch<BalanceRecord[]>(cacheKey, CASH_BALANCE_CACHE_TTL, async () => {
+        const res = await fetch(`/api/families/${currentFamilyId}/cash-balances`, {
+          method: 'GET',
+          headers: await getAuthHeaders(),
+        });
+        const payload = await res.json();
+        if (!res.ok) throw new Error(payload?.error || 'Failed to load cash balances.');
+        return (payload?.balances || []) as BalanceRecord[];
+      });
+
+      setBalances(balances);
     } catch (error) {
       console.error("Error fetching balances:", error);
+      showToast("Failed to load cash balances.", "error");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [authLoading, currentFamilyId, getAuthHeaders, showToast]);
 
   useEffect(() => {
+    if (authLoading) {
+      setLoading(true);
+      return;
+    }
     fetchBalances();
-  }, [fetchBalances]);
+  }, [authLoading, fetchBalances]);
 
   const openAddDialog = () => {
     setEditItem(null);
-    setFormData({ 
-        year: dayjs().year(), 
-        month: dayjs().month(), 
-        amount: '',
-        amountKHR: ''
+    setFormData({
+      year: dayjs().year(),
+      month: dayjs().month(),
+      amount: '',
+      amountKHR: ''
     });
     setDialogOpen(true);
   };
@@ -125,16 +142,25 @@ export default function CashStartingBalancePage() {
     if (!formData.amount && !formData.amountKHR) return;
     setSaving(true);
     try {
-      const docId = `cash_balance_${formData.year}_${formData.month}`;
+      if (!currentFamilyId) throw new Error('No familyId set');
       const amount = parseFloat(formData.amount || '0');
       const amountKHR = parseFloat(formData.amountKHR || '0');
 
-      await setDoc(doc(db, 'settings', docId), {
-        amount: amount,
-        amountKHR: amountKHR,
-        updatedAt: new Date().toISOString()
+      const res = await fetch(`/api/families/${currentFamilyId}/cash-balances`, {
+        method: 'PUT',
+        headers: await getAuthHeaders(),
+        body: JSON.stringify({
+          year: formData.year,
+          month: formData.month,
+          amount,
+          amountKHR,
+        }),
       });
-      
+
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload?.error || 'Failed to save cash balance.');
+
+      cacheInvalidate(`cash-balances:${currentFamilyId}`);
       await fetchBalances();
       showToast(editItem ? "Cash balance updated!" : "Cash balance created!", "success");
       setDialogOpen(false);
@@ -156,7 +182,15 @@ export default function CashStartingBalancePage() {
     if (!isConfirmed) return;
 
     try {
-      await deleteDoc(doc(db, 'settings', id));
+      if (!currentFamilyId) throw new Error('No familyId set');
+      const res = await fetch(`/api/families/${currentFamilyId}/cash-balances?id=${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers: await getAuthHeaders(),
+      });
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload?.error || 'Failed to delete cash balance.');
+
+      cacheInvalidate(`cash-balances:${currentFamilyId}`);
       await fetchBalances();
       showToast("Cash balance record deleted.", "success");
     } catch (error) {
@@ -180,7 +214,7 @@ export default function CashStartingBalancePage() {
           <h1 className="text-heading-5 font-bold text-dark dark:text-white">Cash Starting Balance Management</h1>
           <p className="text-body-sm font-medium text-dark-5">Manage your initial cash-on-hand balance (USD & KHR) for each month</p>
         </Box>
-        
+
         <Button
           variant="contained"
           onClick={openAddDialog}
@@ -211,13 +245,13 @@ export default function CashStartingBalancePage() {
                 balances.map((item) => (
                   <TableRow key={item.id} className="hover:bg-gray-2/50 dark:hover:bg-dark-2/50 transition-colors">
                     <TableCell className="px-6 py-4 font-bold text-dark dark:text-white">
-                        {months[item.month]} {item.year}
+                      {months[item.month]} {item.year}
                     </TableCell>
                     <TableCell className="px-6 py-4 font-black text-success text-right text-lg">
-                        ${item.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      ${item.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                     </TableCell>
                     <TableCell className="px-6 py-4 font-black text-success text-right text-lg">
-                        ៛{item.amountKHR.toLocaleString(undefined, { minimumFractionDigits: 0 })}
+                      ៛{item.amountKHR.toLocaleString(undefined, { minimumFractionDigits: 0 })}
                     </TableCell>
                     <TableCell className="px-6 py-4 text-right">
                       <IconButton onClick={() => openEditDialog(item)} size="small" color="primary" className="mr-1">
@@ -236,13 +270,13 @@ export default function CashStartingBalancePage() {
       </Paper>
 
       {/* Add/Edit Dialog */}
-      <Dialog 
-        open={dialogOpen} 
-        onClose={() => !saving && setDialogOpen(false)} 
-        maxWidth="sm" 
-        fullWidth 
-        PaperProps={{ 
-          sx: { 
+      <Dialog
+        open={dialogOpen}
+        onClose={() => !saving && setDialogOpen(false)}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{
+          sx: {
             borderRadius: '24px',
             boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
             backgroundImage: 'none',
@@ -267,15 +301,15 @@ export default function CashStartingBalancePage() {
               </p>
             </div>
           </div>
-          <IconButton 
-            onClick={() => setDialogOpen(false)} 
+          <IconButton
+            onClick={() => setDialogOpen(false)}
             size="small"
             className="rounded-xl bg-gray-2 text-dark-5 hover:bg-danger/10 hover:text-danger transition-all dark:bg-dark-2"
           >
             <CloseIcon fontSize="small" />
           </IconButton>
         </DialogTitle>
-        
+
         <DialogContent className="p-8 space-y-6 bg-gray-2/30 dark:bg-[#020D1A]/50">
           <div className="grid grid-cols-1 gap-6">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
@@ -288,8 +322,8 @@ export default function CashStartingBalancePage() {
                   fullWidth
                   value={formData.year}
                   onChange={(e) => setFormData({ ...formData, year: parseInt(e.target.value as string) })}
-                  sx={{ 
-                    '& .MuiOutlinedInput-root': { 
+                  sx={{
+                    '& .MuiOutlinedInput-root': {
                       borderRadius: '16px',
                       backgroundColor: 'var(--color-background)',
                       '& fieldset': { borderColor: 'var(--color-stroke)' },
@@ -308,8 +342,8 @@ export default function CashStartingBalancePage() {
                   fullWidth
                   value={formData.month}
                   onChange={(e) => setFormData({ ...formData, month: parseInt(e.target.value as string) })}
-                  sx={{ 
-                    '& .MuiOutlinedInput-root': { 
+                  sx={{
+                    '& .MuiOutlinedInput-root': {
                       borderRadius: '16px',
                       backgroundColor: 'var(--color-background)',
                       '& fieldset': { borderColor: 'var(--color-stroke)' },
@@ -334,8 +368,8 @@ export default function CashStartingBalancePage() {
                   InputProps={{
                     startAdornment: <Typography className="mr-2 text-dark-5 font-bold">$</Typography>
                   }}
-                  sx={{ 
-                    '& .MuiOutlinedInput-root': { 
+                  sx={{
+                    '& .MuiOutlinedInput-root': {
                       borderRadius: '16px',
                       backgroundColor: 'var(--color-background)',
                       '& fieldset': { borderColor: 'var(--color-stroke)' },
@@ -355,8 +389,8 @@ export default function CashStartingBalancePage() {
                   InputProps={{
                     startAdornment: <Typography className="mr-2 text-dark-5 font-bold">៛</Typography>
                   }}
-                  sx={{ 
-                    '& .MuiOutlinedInput-root': { 
+                  sx={{
+                    '& .MuiOutlinedInput-root': {
                       borderRadius: '16px',
                       backgroundColor: 'var(--color-background)',
                       '& fieldset': { borderColor: 'var(--color-stroke)' },
@@ -367,18 +401,18 @@ export default function CashStartingBalancePage() {
             </div>
           </div>
         </DialogContent>
-        
+
         <DialogActions className="p-6 border-t border-stroke dark:border-dark-3 bg-white dark:bg-gray-dark">
-          <button 
-            onClick={() => setDialogOpen(false)} 
-            disabled={saving} 
+          <button
+            onClick={() => setDialogOpen(false)}
+            disabled={saving}
             className="px-6 py-3 text-sm font-bold text-dark-4 hover:text-dark transition-colors mr-2 dark:text-dark-6 dark:hover:text-white"
           >
             Cancel
           </button>
-          <Button 
-            variant="contained" 
-            onClick={handleSave} 
+          <Button
+            variant="contained"
+            onClick={handleSave}
             disabled={saving}
             sx={{
               bgcolor: '#10B981',
@@ -389,7 +423,7 @@ export default function CashStartingBalancePage() {
               textTransform: 'none',
               fontSize: '0.875rem',
               boxShadow: '0 10px 15px -3px rgba(16, 185, 129, 0.2)',
-              '&:hover': { 
+              '&:hover': {
                 bgcolor: '#059669',
                 boxShadow: '0 20px 25px -5px rgba(16, 185, 129, 0.3)'
               },

@@ -28,6 +28,7 @@ import {
 } from "@/components/NextAdmin/Dashboard/overview-cards/icons";
 import { DatePicker, LocalizationProvider } from "@mui/x-date-pickers";
 import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
+import { useAuthContext } from "@/components/AuthProvider";
 
 export default function MonthlyReportPage() {
   const params = useParams();
@@ -48,15 +49,19 @@ export default function MonthlyReportPage() {
   ], []);
   const years = [2024, 2025, 2026];
 
+  const { currentFamilyId } = useAuthContext();
+
   useEffect(() => {
     async function loadReport() {
       setLoading(true);
       try {
+        if (!currentFamilyId) return;
         const data = await getClearPortStats(month, year, {
           paymentMethodFilter: [bankName],
           currencyFilter: "USD",
           bankId: bankId,
-          statusFilter: statusFilter
+          statusFilter: statusFilter,
+          familyId: currentFamilyId
         });
         setStats(data);
       } catch (error) {
@@ -65,8 +70,8 @@ export default function MonthlyReportPage() {
         setLoading(false);
       }
     }
-    loadReport();
-  }, [month, year, bankName, statusFilter]);
+    if (currentFamilyId) loadReport();
+  }, [month, year, bankName, statusFilter, currentFamilyId]);
 
   const filteredTransactions = useMemo(() => {
     if (!stats?.monthlyTransactionsList) return [];
@@ -95,15 +100,15 @@ export default function MonthlyReportPage() {
   }, [stats, selectedIds]);
 
   const handleExportExcel = async () => {
-    const dataToExport = selectedIds.length > 0 
+    const dataToExport = selectedIds.length > 0
       ? stats.monthlyTransactionsList.filter((r: any) => selectedIds.includes(r.id))
       : filteredTransactions;
-    
+
     await generateExcel("Monthly Financial Report", ["Date", "Description", "Payment Method", "Category", "Type", "Currency", "Debit", "Credit"], dataToExport, bankName);
   };
 
   const handleExportPdf = () => {
-    const dataToExport = selectedIds.length > 0 
+    const dataToExport = selectedIds.length > 0
       ? stats.monthlyTransactionsList.filter((r: any) => selectedIds.includes(r.id))
       : filteredTransactions;
 
@@ -139,7 +144,17 @@ export default function MonthlyReportPage() {
     );
   }
 
-  const netSavings = stats.monthlyIncome - stats.monthlyAmount;
+  // Compute closing balance from the full transaction list (includes future-dated entries)
+  // so it matches the server API which counts all transactions in the month.
+  const { totalMonthlyIncome, totalMonthlyExpense } = (stats.monthlyTransactionsList as any[] ?? []).reduce(
+    (acc: { totalMonthlyIncome: number; totalMonthlyExpense: number }, item: any) => {
+      if (item.Type === 'Income') acc.totalMonthlyIncome += item.Amount;
+      else acc.totalMonthlyExpense += item.Amount;
+      return acc;
+    },
+    { totalMonthlyIncome: 0, totalMonthlyExpense: 0 }
+  );
+  const netSavings = totalMonthlyIncome - totalMonthlyExpense;
   const currentBankBalance = (stats.startingBalance || 0) + netSavings;
 
   const formatValue = (val: number, itemCurrency: string = "USD") => {
@@ -155,10 +170,10 @@ export default function MonthlyReportPage() {
       <div className="flex flex-wrap items-end justify-between gap-6 print:hidden">
         <div>
           <h1 className="text-4xl font-black tracking-tight text-dark dark:text-white">
-            {bankName} Statement <span className="text-primary opacity-50">#</span>{months[month].substring(0, 3).toUpperCase()}{year}
+            Statement <span className="text-primary opacity-50">#</span>{months[month].substring(0, 3).toUpperCase()}{year}
           </h1>
           <p className="mt-2 text-base font-medium text-gray-500">
-            Comprehensive financial reconciliation for {bankName} in {months[month]}
+            Comprehensive financial reconciliation for {months[month]}
           </p>
         </div>
 
@@ -249,30 +264,30 @@ export default function MonthlyReportPage() {
         </div>
 
         {/* Closing Balance */}
+        <OverviewCard
+          label="Closing Position"
+          data={{ value: formatValue(currentBankBalance) }}
+          Icon={BalanceIcon}
+          gradient="dark"
+        />
+      </div>
+
+      {dateFilter && (
+        <div className="grid gap-4 sm:grid-cols-2 animate-fade-in">
           <OverviewCard
-            label="Closing Position"
-            data={{ value: formatValue(currentBankBalance) }}
-            Icon={BalanceIcon}
-            gradient="dark"
+            label={`Total Debit (${dayjs(dateFilter).format('DD MMM')})`}
+            data={{ value: formatValue(dailyStats.debit), growthRate: 0 }}
+            Icon={IncomeIcon}
+            gradient="green"
+          />
+          <OverviewCard
+            label={`Total Credit (${dayjs(dateFilter).format('DD MMM')})`}
+            data={{ value: formatValue(dailyStats.credit), growthRate: 0 }}
+            Icon={ExpenseIcon}
+            gradient="red"
           />
         </div>
-
-        {dateFilter && (
-          <div className="grid gap-4 sm:grid-cols-2 animate-fade-in">
-            <OverviewCard
-              label={`Total Debit (${dayjs(dateFilter).format('DD MMM')})`}
-              data={{ value: formatValue(dailyStats.debit), growthRate: 0 }}
-              Icon={IncomeIcon}
-              gradient="green"
-            />
-            <OverviewCard
-              label={`Total Credit (${dayjs(dateFilter).format('DD MMM')})`}
-              data={{ value: formatValue(dailyStats.credit), growthRate: 0 }}
-              Icon={ExpenseIcon}
-              gradient="red"
-            />
-          </div>
-        )}
+      )}
 
       {/* --- Main Report Section --- */}
       <div className="overflow-hidden rounded-[32px] border border-stroke bg-white/50 backdrop-blur-md shadow-2xl dark:border-white/5 dark:bg-dark-2/50">
@@ -290,7 +305,7 @@ export default function MonthlyReportPage() {
               />
             </LocalizationProvider>
             {dateFilter && (
-              <button 
+              <button
                 onClick={() => setDateFilter(null)}
                 className="text-xs font-bold text-danger hover:underline"
               >
@@ -384,16 +399,16 @@ export default function MonthlyReportPage() {
                   return stats.monthlyTransactionsList?.map((item: any, idx: number) => {
                     const isIncome = item.Type === "Income";
                     isIncome ? runningBalance += item.Amount : runningBalance -= item.Amount;
-                    
+
                     if (dateFilter && item.Date !== dateFilter) return null;
-                    
+
                     const isSelected = selectedIds.includes(item.id);
 
                     return (
-                      <TableRow 
-                        key={idx} 
+                      <TableRow
+                        key={idx}
                         className={cn(
-                          "hover:bg-gray-50/50 dark:hover:bg-white/5 transition-colors cursor-pointer", 
+                          "hover:bg-gray-50/50 dark:hover:bg-white/5 transition-colors cursor-pointer",
                           isSelected ? "bg-primary/5 dark:bg-primary/10" : "",
                           item.isFuture && "opacity-40 grayscale italic"
                         )}

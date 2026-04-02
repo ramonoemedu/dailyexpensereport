@@ -1,0 +1,102 @@
+rules_version='2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function uidUserDocPath() {
+      return /databases/$(database)/documents/system_users/$(request.auth.uid);
+    }
+
+    function hasUidUserDoc() {
+      return isSignedIn() && exists(uidUserDocPath());
+    }
+
+    function hasFamilyInUidUserDoc(familyId) {
+      return hasUidUserDoc() && get(uidUserDocPath()).data.families[familyId] != null;
+    }
+
+    function familyMemberDocPath(familyId) {
+      return /databases/$(database)/documents/families/$(familyId)/members/$(request.auth.uid);
+    }
+
+    function hasFamilyMemberDoc(familyId) {
+      return isSignedIn() && exists(familyMemberDocPath(familyId));
+    }
+
+    function isFamilyMember(familyId) {
+      return isSignedIn()
+        && (hasFamilyInUidUserDoc(familyId) || hasFamilyMemberDoc(familyId));
+    }
+
+    function isFamilyAdmin(familyId) {
+      return isSignedIn()
+        && (
+          (hasUidUserDoc() && get(uidUserDocPath()).data.families[familyId] == 'admin')
+          || (hasFamilyMemberDoc(familyId) && get(familyMemberDocPath(familyId)).data.role == 'admin')
+        );
+    }
+
+    function isSystemAdmin() {
+      return isSignedIn()
+        && hasUidUserDoc()
+        && get(uidUserDocPath()).data.systemAdmin == true;
+    }
+
+    // User profile docs. UID-keyed documents are required for auth lookup.
+    match /system_users/{uid} {
+      // Support both UID-keyed docs and legacy random-id docs containing uid field.
+      allow read: if isSignedIn() && (
+        request.auth.uid == uid || resource.data.uid == request.auth.uid
+      );
+      allow create: if isSignedIn() && (
+        request.auth.uid == uid || request.resource.data.uid == request.auth.uid
+      );
+      allow update: if isSignedIn() && (
+        request.auth.uid == uid || resource.data.uid == request.auth.uid
+      );
+      allow delete: if false;
+    }
+
+    // Tenant root
+    match /families/{familyId} {
+      allow read: if isFamilyMember(familyId) || isSystemAdmin();
+      allow create: if isSignedIn();
+      allow update, delete: if isFamilyAdmin(familyId) || isSystemAdmin();
+
+      match /expenses/{expenseId} {
+        allow read: if isFamilyMember(familyId) || isSystemAdmin();
+        allow create, update, delete: if false;
+      }
+
+      match /settings/{settingId} {
+        allow read: if isFamilyMember(familyId) || isSystemAdmin();
+        allow create, update, delete: if isFamilyAdmin(familyId) || isSystemAdmin();
+      }
+
+      match /members/{memberId} {
+        allow read: if isFamilyMember(familyId) || isSystemAdmin();
+        allow create, update, delete: if isFamilyAdmin(familyId) || isSystemAdmin();
+      }
+    }
+
+    // Legacy global collections. Access from client is now disabled.
+    match /settings/{docId} {
+      allow read, write: if false;
+    }
+
+    match /income_configs/{docId} {
+      allow read, write: if false;
+    }
+
+    match /pdf_conversions/{docId} {
+      allow read, write: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,22 +1,92 @@
+'use client';
+
 import { db } from "@/lib/firebase";
 import { collection, getDocs, query, orderBy, doc, getDoc } from "firebase/firestore";
 import { sanitizeKey } from "@/utils/KeySanitizer";
 import dayjs from "dayjs";
 import { autoCategorize } from "@/utils/DescriptionHelper";
+import { cacheRead, cacheWrite, cacheInvalidate } from "@/utils/clientCache";
+
+const STATS_CACHE_TTL_MS = 30 * 60_000;   // 30 min — busted on writes
+const RAW_DOCS_CACHE_TTL_MS = 30 * 60_000; // 30 min — busted on writes
+
+// Raw docs stay in memory only (too large for localStorage)
+type RawDocsEntry = { ts: number; docs: Array<{ id: string; data: Record<string, any> }> };
+const rawDocsCache = new Map<string, RawDocsEntry>();
+const rawDocsInflight = new Map<string, Promise<RawDocsEntry["docs"]>>();
+
+function readCache<T>(key: string): T | null {
+  return cacheRead<T>(key, STATS_CACHE_TTL_MS);
+}
+
+function writeCache<T>(key: string, value: T) {
+  cacheWrite(key, value);
+}
+
+export function invalidateFamilyCache(familyId: string) {
+  rawDocsCache.delete(familyId);
+  rawDocsInflight.delete(familyId);
+  cacheInvalidate(familyId);
+}
+
+async function getFamilyExpenseDocs(familyId: string): Promise<RawDocsEntry["docs"]> {
+  const cached = rawDocsCache.get(familyId);
+  if (cached && Date.now() - cached.ts < RAW_DOCS_CACHE_TTL_MS) return cached.docs;
+
+  // Deduplicate concurrent calls — return the same in-flight Promise
+  const inflight = rawDocsInflight.get(familyId);
+  if (inflight) return inflight;
+
+  const promise = getDocs(collection(db, "families", familyId, "expenses")).then(snap => {
+    const docs = snap.docs.map(d => ({ id: d.id, data: d.data() as Record<string, any> }));
+    rawDocsCache.set(familyId, { ts: Date.now(), docs });
+    rawDocsInflight.delete(familyId);
+    return docs;
+  }).catch(err => {
+    rawDocsInflight.delete(familyId);
+    throw err;
+  });
+
+  rawDocsInflight.set(familyId, promise);
+  return promise;
+}
+
+function stableFilterValue(value: string | string[] | undefined) {
+  if (!Array.isArray(value)) return value || "";
+  return [...value].sort().join("|");
+}
 
 export async function getClearPortStats(month?: number, year?: number, options?: { 
   paymentMethodFilter?: string | string[], 
   currencyFilter?: string,
   bankId?: string,
-  statusFilter?: 'all' | 'active' | 'inactive'
+  statusFilter?: 'all' | 'active' | 'inactive',
+  familyId?: string
 }) {
   try {
-    const snapshot = await getDocs(collection(db, "expenses"));
+    const cacheKey = [
+      "getClearPortStats",
+      month ?? "",
+      year ?? "",
+      options?.familyId ?? "",
+      stableFilterValue(options?.paymentMethodFilter),
+      options?.currencyFilter ?? "",
+      options?.bankId ?? "",
+      options?.statusFilter ?? "",
+    ].join("::");
+
+    const cached = readCache<any>(cacheKey);
+    if (cached) return cached;
+
+    const familyId = options?.familyId;
+    if (!familyId) throw new Error("No familyId set for stats");
+
+    const rawDocs = await getFamilyExpenseDocs(familyId);
     const now = dayjs();
     const targetMonth = month !== undefined ? month : now.month();
     const targetYear = year !== undefined ? year : now.year();
     const targetTime = targetYear * 12 + targetMonth;
-    
+
     // Core stats
     let monthlyTransactions = 0;
     let monthlyAmount = 0;
@@ -40,52 +110,43 @@ export async function getClearPortStats(month?: number, year?: number, options?:
     let cashMonthlyExpense = 0;
 
     try {
-      const balanceSnapshot = await getDocs(collection(db, "settings"));
-      
-      // 1. Generic/Selected balance for main cards
       const isCashReport = options?.paymentMethodFilter === "Cash" || (Array.isArray(options?.paymentMethodFilter) && options?.paymentMethodFilter.includes("Cash") && options?.paymentMethodFilter.length === 1);
-      let balancePrefix = isCashReport ? "cash_balance_" : (options?.bankId ? `balance_${options.bankId}_` : "balance_");
-      
-      const balances = balanceSnapshot.docs
-        .filter(d => d.id.startsWith(balancePrefix))
-        .map(d => {
-          const parts = d.id.split("_");
-          let y, m;
-          if (parts.length === 4) { y = parseInt(parts[2]); m = parseInt(parts[3]); }
-          else if (parts.length === 3) { y = parseInt(parts[1]); m = parseInt(parts[2]); }
-          else return null;
-          
-          let amt = parseFloat(d.data().amount || 0);
-          if (isCashReport && options?.currencyFilter === "KHR") amt = parseFloat(d.data().amountKHR || 0);
-          return { year: y, month: m, amount: amt };
-        })
-        .filter((r): r is {year: number, month: number, amount: number} => r !== null)
+
+      const configSnap = await getDoc(doc(db, "families", familyId, "settings", "config"));
+      const config = configSnap.exists() ? configSnap.data() as any : {};
+      const familyBankBalances = Array.isArray(config?.balances) ? config.balances : [];
+      const familyCashBalances = Array.isArray(config?.cashBalances) ? config.cashBalances : [];
+
+      const normalize = (arr: any[], useKHR = false) => arr
+        .map((b) => ({
+          year: Number(b.year),
+          month: Number(b.month),
+          amount: Number(useKHR ? (b.amountKHR || 0) : (b.amount || 0)),
+        }))
+        .filter((r) => Number.isFinite(r.year) && Number.isFinite(r.month))
         .sort((a, b) => (a.year * 12 + a.month) - (b.year * 12 + b.month));
+
+      let balances = isCashReport
+        ? normalize(familyCashBalances, options?.currencyFilter === "KHR")
+        : normalize(options?.bankId ? familyBankBalances.filter((b: any) => b.bankId === options.bankId) : familyBankBalances, false);
+
+      let bankBalances = normalize(familyBankBalances.filter((b: any) => b.bankId === "chip-mong"), false);
+      let cashBalances = normalize(familyCashBalances, false);
 
       const anchor = [...balances].reverse().find(r => (r.year * 12 + r.month) <= targetTime);
       if (anchor) startingBalance = anchor.amount;
 
-      // 2. Dashboard specific balances (Bank vs Cash)
-      const bankBalances = balanceSnapshot.docs
-        .filter(d => d.id.startsWith("balance_chip-mong_"))
-        .map(d => ({ year: parseInt(d.id.split("_")[2]), month: parseInt(d.id.split("_")[3]), amount: parseFloat(d.data().amount || 0) }))
-        .sort((a, b) => (a.year * 12 + a.month) - (b.year * 12 + b.month));
-      
       const bankAnchor = [...bankBalances].reverse().find(r => (r.year * 12 + r.month) <= targetTime);
       if (bankAnchor) bankStartingBalance = bankAnchor.amount;
 
-      const cashBalances = balanceSnapshot.docs
-        .filter(d => d.id.startsWith("cash_balance_"))
-        .map(d => ({ year: parseInt(d.id.split("_")[2]), month: parseInt(d.id.split("_")[3]), amount: parseFloat(d.data().amount || 0) }))
-        .sort((a, b) => (a.year * 12 + a.month) - (b.year * 12 + b.month));
-      
       const cashAnchor = [...cashBalances].reverse().find(r => (r.year * 12 + r.month) <= targetTime);
       if (cashAnchor) cashStartingBalance = cashAnchor.amount;
 
     } catch (e) { console.error("Balance fetch error:", e); }
 
-    snapshot.docs.forEach(doc => {
-      const data = doc.data();
+    rawDocs.forEach(({ id, data: rawData }) => {
+      const doc = { id };
+      const data = rawData;
       const status = data.status || 'active';
       const isRecordActive = status === 'active';
 
@@ -104,6 +165,7 @@ export async function getClearPortStats(month?: number, year?: number, options?:
       const currency = data["Currency"] || data["currency"] || "USD";
       const isIncome = (data.Type || data.type || "Expense").toLowerCase() === "income";
       const dateStr = data.Date || data.date || data.createdAt;
+      
       if (!dateStr) return;
       const date = dayjs(dateStr);
       if (!date.isValid()) return;
@@ -117,7 +179,6 @@ export async function getClearPortStats(month?: number, year?: number, options?:
         if (method.includes("cash")) {
           if (isIncome) cashMonthlyIncome += (isTargetMonth ? amount : 0);
           else cashMonthlyExpense += (isTargetMonth ? amount : 0);
-          // For carryover we'd need more complex logic, but let's stick to monthly for now or add full timeline
         } else {
           if (isIncome) bankMonthlyIncome += (isTargetMonth ? amount : 0);
           else bankMonthlyExpense += (isTargetMonth ? amount : 0);
@@ -178,7 +239,7 @@ export async function getClearPortStats(month?: number, year?: number, options?:
       .sort(([, a], [, b]) => b - a)
       .map(([name, value]) => ({ name, value }));
 
-    return {
+    const result = {
       monthlyTransactions, monthlyAmount, monthlyIncome, monthlyIncomeWithFuture,
       monthlyIncomeItems, monthlyTransactionsList, maxExpense, yearlyIncome, yearlyExpense,
       topCategory: sortedCategories[0]?.name || "None",
@@ -188,6 +249,9 @@ export async function getClearPortStats(month?: number, year?: number, options?:
       cashBalance: cashStartingBalance + cashMonthlyIncome - cashMonthlyExpense,
       growth: { total: 10, amount: 5 }
     };
+
+    writeCache(cacheKey, result);
+    return result;
   } catch (error) {
     console.error("Error fetching expense stats:", error);
     return {
@@ -198,27 +262,29 @@ export async function getClearPortStats(month?: number, year?: number, options?:
     };
   }
 }
- 
 
-export async function getClearanceTimelineData(year?: number) {
+export async function getClearanceTimelineData(year?: number, familyId?: string) {
   try {
-    const snapshot = await getDocs(collection(db, "expenses"));
+    const cacheKey = ["getClearanceTimelineData", year ?? "", familyId ?? ""].join("::");
+    const cached = readCache<any>(cacheKey);
+    if (cached) return cached;
+
+    if (!familyId) throw new Error("No familyId set for timeline");
+    const rawDocs = await getFamilyExpenseDocs(familyId);
     const targetYear = year || dayjs().year();
     const incomeMonthly: Record<string, number> = {};
     const expenseMonthly: Record<string, number> = {};
-    
+
     const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     months.forEach(m => { incomeMonthly[m] = 0; expenseMonthly[m] = 0; });
 
     const now = dayjs();
-    snapshot.docs.forEach(doc => {
-      const data = doc.data();
+    rawDocs.forEach(({ data }) => {
       if (data.status === 'inactive') return;
 
       const dateStr = data[sanitizeKey("Date")] || data["Date"];
       if (dateStr) {
         const date = dayjs(dateStr);
-        // Skip future dates for stats
         if (date.isAfter(now, 'day')) return;
 
         if (date.year() === targetYear) {
@@ -230,39 +296,45 @@ export async function getClearanceTimelineData(year?: number) {
           const amount = Math.abs(parseFloat(rawAmount));
           if (isNaN(amount) || amount === 0) return;
 
-          if (data["Type"] === "Income") incomeMonthly[month] += amount;
+          if (data["Type"] === "Income" || data["type"] === "Income") incomeMonthly[month] += amount;
           else expenseMonthly[month] += amount;
         }
       }
     });
 
-    return {
+    const result = {
       income: months.map(m => ({ x: m, y: parseFloat(incomeMonthly[m].toFixed(2)) })),
       expense: months.map(m => ({ x: m, y: parseFloat(expenseMonthly[m].toFixed(2)) }))
     };
+
+    writeCache(cacheKey, result);
+    return result;
   } catch (error) {
     console.error("Error fetching timeline data:", error);
     return { income: [], expense: [] };
   }
 }
 
-export async function getWeeksProfitData(month?: number, year?: number) {
+export async function getWeeksProfitData(month?: number, year?: number, familyId?: string) {
   try {
-    const snapshot = await getDocs(collection(db, "expenses"));
+    const cacheKey = ["getWeeksProfitData", month ?? "", year ?? "", familyId ?? ""].join("::");
+    const cached = readCache<any>(cacheKey);
+    if (cached) return cached;
+
+    if (!familyId) throw new Error("No familyId set for weeks profit");
+    const rawDocs = await getFamilyExpenseDocs(familyId);
     const now = dayjs();
     const targetMonth = month !== undefined ? month : now.month();
     const targetYear = year !== undefined ? year : now.year();
     const categoryTotals: Record<string, number> = {};
 
-    snapshot.docs.forEach(doc => {
-      const data = doc.data();
+    rawDocs.forEach(({ data }) => {
       if (data.status === 'inactive') return;
 
       const dateStr = data[sanitizeKey("Date")] || data["Date"];
       if (!dateStr) return;
 
       const date = dayjs(dateStr);
-      // Skip future dates for stats
       if (date.isAfter(now, 'day')) return;
 
       if (date.month() === targetMonth && date.year() === targetYear) {
@@ -283,18 +355,21 @@ export async function getWeeksProfitData(month?: number, year?: number) {
       .sort(([, a], [, b]) => b - a)
       .slice(0, 10);
 
-    return {
+    const result = {
       sales: topCategories.map(([name, value]) => ({ x: name, y: parseFloat(value.toFixed(2)) })),
       revenue: topCategories.map(() => ({ x: "", y: 0 })),
     };
+
+    writeCache(cacheKey, result);
+    return result;
   } catch (error) {
     console.error("Error fetching category data:", error);
     return { sales: [], revenue: [] };
   }
 }
 
-export async function getPaymentsOverviewData(year?: number) {
-  return getClearanceTimelineData(year);
+export async function getPaymentsOverviewData(year?: number, familyId?: string) {
+  return getClearanceTimelineData(year, familyId);
 }
 
 export async function getDevicesUsedData(timeFrame?: string) {
@@ -307,11 +382,7 @@ export async function getDevicesUsedData(timeFrame?: string) {
 }
 
 export async function getCampaignVisitorsData() {
-  return {
-    total_visitors: 0,
-    performance: 0,
-    chart: [],
-  };
+  return { total_visitors: 0, performance: 0, chart: [] };
 }
 
 export async function getVisitorsAnalyticsData() {
@@ -319,9 +390,5 @@ export async function getVisitorsAnalyticsData() {
 }
 
 export async function getCostsPerInteractionData() {
-  return {
-    avg_cost: 0,
-    growth: 0,
-    chart: [],
-  };
+  return { avg_cost: 0, growth: 0, chart: [] };
 }

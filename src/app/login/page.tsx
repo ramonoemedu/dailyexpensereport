@@ -2,16 +2,12 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { auth, db } from '@/lib/firebase';
-import { 
-  signInWithEmailAndPassword, 
-  setPersistence, 
-  browserLocalPersistence, 
-  browserSessionPersistence,
+import { auth } from '@/lib/firebase';
+import {
+  signInWithEmailAndPassword,
   GoogleAuthProvider,
   signInWithPopup
 } from "firebase/auth";
-import { collection, query, where, getDocs, limit, or } from 'firebase/firestore';
 import {
   Box,
   Button,
@@ -19,8 +15,6 @@ import {
   Typography,
   Paper,
   Alert,
-  Checkbox,
-  FormControlLabel,
   Divider,
   InputAdornment,
   IconButton,
@@ -40,12 +34,18 @@ const gradientAnimation = keyframes`
 `;
 
 export default function LoginPage() {
+  const [mode, setMode] = useState<'login' | 'register'>('login');
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
+  const [registerFullName, setRegisterFullName] = useState('');
+  const [registerUsername, setRegisterUsername] = useState('');
+  const [registerUserId, setRegisterUserId] = useState(`USR-${Math.floor(1000 + Math.random() * 9000)}`);
+  const [registerEmail, setRegisterEmail] = useState('');
+  const [registerPassword, setRegisterPassword] = useState('');
+  const [registerConfirmPassword, setRegisterConfirmPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
-  const [rememberMe, setRememberMe] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const router = useRouter();
 
@@ -73,41 +73,71 @@ export default function LoginPage() {
       let loginEmail = identifier.trim();
 
       if (!identifier.includes('@')) {
-        const q = query(
-          collection(db, 'system_users'), 
-          or(
-            where('username', '==', identifier.toLowerCase().trim()),
-            where('userId', '==', identifier.trim())
-          ),
-          limit(1)
-        );
-        
-        let snapshot;
-        try {
-          snapshot = await getDocs(q);
-        } catch (dbErr: any) {
-          throw new Error("Login system error. Please try again later.");
+        const resolveRes = await fetch('/api/auth/resolve-identifier', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ identifier: identifier.trim() }),
+        });
+
+        const resolveData = await resolveRes.json();
+        if (!resolveRes.ok) {
+          throw new Error(resolveData.error || 'Login system error. Please try again later.');
         }
-        
-        if (snapshot.empty) {
-          throw new Error("Username or User ID not found.");
-        }
-        
-        const userData = snapshot.docs[0].data();
-        if (userData.status === 'inactive') {
-          throw new Error("This account is currently inactive.");
-        }
-        
-        loginEmail = userData.loginEmail || `${userData.username}@clearport.local`;
+
+        loginEmail = resolveData.loginEmail;
       }
 
-      await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
       await signInWithEmailAndPassword(auth, loginEmail, password);
       router.push('/');
     } catch (err: any) {
       console.error(err);
       let msg = err.message;
       if (err.code === 'auth/invalid-credential') msg = "Incorrect identifier or password.";
+      setError(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (loading) return;
+    setError('');
+
+    if (!registerFullName || !registerUsername || !registerUserId || !registerEmail || !registerPassword) {
+      setError('Please fill all required fields.');
+      return;
+    }
+
+    if (registerPassword !== registerConfirmPassword) {
+      setError('Passwords do not match.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const registerRes = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fullName: registerFullName.trim(),
+          username: registerUsername.trim().toLowerCase(),
+          userId: registerUserId.trim(),
+          email: registerEmail.trim().toLowerCase(),
+          password: registerPassword,
+        }),
+      });
+
+      const registerData = await registerRes.json();
+      if (!registerRes.ok) {
+        throw new Error(registerData?.error || 'Registration failed.');
+      }
+
+      await signInWithEmailAndPassword(auth, registerEmail.trim().toLowerCase(), registerPassword);
+      router.push('/');
+    } catch (err: any) {
+      let msg = err.message || 'Registration failed.';
+      if (err.code === 'auth/email-already-in-use') msg = 'Email already exists.';
       setError(msg);
     } finally {
       setLoading(false);
@@ -152,36 +182,40 @@ export default function LoginPage() {
             Daily Expense
           </Typography>
           <Typography variant="body2" color="text.secondary" fontWeight={600}>
-            Sign in to manage your daily expenses
+            {mode === 'login' ? 'Sign in to manage your daily expenses' : 'Create your account and start onboarding'}
           </Typography>
         </Box>
 
-        <Button
-          fullWidth
-          variant="outlined"
-          size="large"
-          disabled={isFormDisabled}
-          onClick={handleGoogleLogin}
-          startIcon={googleLoading ? <CircularProgress size={20} /> : <GoogleIcon />}
-          sx={{
-            py: 1.5,
-            borderRadius: '16px',
-            textTransform: 'none',
-            fontWeight: 700,
-            borderColor: '#E2E8F0',
-            color: '#475569',
-            mb: 3,
-            '&:hover': { borderColor: '#CBD5E1', bgcolor: 'rgba(248, 250, 252, 0.8)' }
-          }}
-        >
-          {googleLoading ? 'Redirecting...' : 'Continue with Google'}
-        </Button>
+        {mode === 'login' && (
+          <>
+            <Button
+              fullWidth
+              variant="outlined"
+              size="large"
+              disabled={isFormDisabled}
+              onClick={handleGoogleLogin}
+              startIcon={googleLoading ? <CircularProgress size={20} /> : <GoogleIcon />}
+              sx={{
+                py: 1.5,
+                borderRadius: '16px',
+                textTransform: 'none',
+                fontWeight: 700,
+                borderColor: '#E2E8F0',
+                color: '#475569',
+                mb: 3,
+                '&:hover': { borderColor: '#CBD5E1', bgcolor: 'rgba(248, 250, 252, 0.8)' }
+              }}
+            >
+              {googleLoading ? 'Redirecting...' : 'Continue with Google'}
+            </Button>
 
-        <Divider sx={{ width: '100%', mb: 3 }}>
-          <Typography variant="caption" sx={{ color: '#94A3B8', fontWeight: 700, textTransform: 'uppercase' }}>
-            Or use account
-          </Typography>
-        </Divider>
+            <Divider sx={{ width: '100%', mb: 3 }}>
+              <Typography variant="caption" sx={{ color: '#94A3B8', fontWeight: 700, textTransform: 'uppercase' }}>
+                Or use account
+              </Typography>
+            </Divider>
+          </>
+        )}
 
         {error && (
           <Box sx={{ width: '100%', mb: 3 }}>
@@ -189,88 +223,177 @@ export default function LoginPage() {
           </Box>
         )}
 
-        <Box component="form" onSubmit={handleSubmit} sx={{ width: '100%' }}>
-          <TextField
-            margin="normal"
-            fullWidth
-            label="Username, User ID or Email"
-            disabled={isFormDisabled}
-            value={identifier}
-            onChange={(e) => setIdentifier(e.target.value)}
-            placeholder="e.g. ramonoem"
-            autoComplete="username"
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <PersonOutlineIcon sx={{ color: '#94A3B8' }} />
-                </InputAdornment>
-              ),
-            }}
-            sx={{ mb: 2, '& .MuiOutlinedInput-root': { borderRadius: '16px', bgcolor: '#F8FAFC' } }}
-            required
-          />
-          <TextField
-            margin="normal"
-            fullWidth
-            label="Password"
-            disabled={isFormDisabled}
-            type={showPassword ? 'text' : 'password'}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete="current-password"
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <VpnKeyOutlineIcon sx={{ color: '#94A3B8' }} />
-                </InputAdornment>
-              ),
-              endAdornment: (
-                <InputAdornment position="end">
-                  <IconButton onClick={() => setShowPassword(!showPassword)} edge="end" disabled={isFormDisabled}>
-                    {showPassword ? <VisibilityOff /> : <Visibility />}
-                  </IconButton>
-                </InputAdornment>
-              )
-            }}
-            sx={{ mb: 2, '& .MuiOutlinedInput-root': { borderRadius: '16px', bgcolor: '#F8FAFC' } }}
-            required
-          />
-          
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-            <FormControlLabel
-              control={
-                <Checkbox 
-                  size="small"
-                  checked={rememberMe} 
-                  onChange={(e) => setRememberMe(e.target.checked)} 
-                  disabled={isFormDisabled}
-                  sx={{ '&.Mui-checked': { color: '#006BFF' } }}
-                />
-              }
-              label={<Typography variant="body2" color="#475569" fontWeight={600}>Remember me</Typography>}
+        {mode === 'login' ? (
+          <Box component="form" onSubmit={handleSubmit} sx={{ width: '100%' }}>
+            <TextField
+              margin="normal"
+              fullWidth
+              label="Username, User ID or Email"
+              disabled={isFormDisabled}
+              value={identifier}
+              onChange={(e) => setIdentifier(e.target.value)}
+              placeholder="e.g. ramonoem"
+              autoComplete="username"
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <PersonOutlineIcon sx={{ color: '#94A3B8' }} />
+                  </InputAdornment>
+                ),
+              }}
+              sx={{ mb: 2, '& .MuiOutlinedInput-root': { borderRadius: '16px', bgcolor: '#F8FAFC' } }}
+              required
             />
-          </Box>
+            <TextField
+              margin="normal"
+              fullWidth
+              label="Password"
+              disabled={isFormDisabled}
+              type={showPassword ? 'text' : 'password'}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <VpnKeyOutlineIcon sx={{ color: '#94A3B8' }} />
+                  </InputAdornment>
+                ),
+                endAdornment: (
+                  <InputAdornment position="end">
+                    <IconButton onClick={() => setShowPassword(!showPassword)} edge="end" disabled={isFormDisabled}>
+                      {showPassword ? <VisibilityOff /> : <Visibility />}
+                    </IconButton>
+                  </InputAdornment>
+                )
+              }}
+              sx={{ mb: 2, '& .MuiOutlinedInput-root': { borderRadius: '16px', bgcolor: '#F8FAFC' } }}
+              required
+            />
 
+
+            <Button
+              type="submit"
+              fullWidth
+              variant="contained"
+              disabled={isFormDisabled}
+              sx={{
+                py: 2,
+                fontWeight: 800,
+                fontSize: '1rem',
+                borderRadius: '16px',
+                textTransform: 'none',
+                bgcolor: '#006BFF',
+                boxShadow: '0 10px 15px -3px rgba(0, 107, 255, 0.3)',
+                '&:hover': { bgcolor: '#0052CC', boxShadow: '0 20px 25px -5px rgba(0, 107, 255, 0.4)' }
+              }}
+            >
+              {loading ? 'Authenticating...' : 'Sign In'}
+            </Button>
+          </Box>
+        ) : (
+          <Box component="form" onSubmit={handleRegister} sx={{ width: '100%' }}>
+            <TextField
+              margin="normal"
+              fullWidth
+              label="Full Name"
+              disabled={isFormDisabled}
+              value={registerFullName}
+              onChange={(e) => setRegisterFullName(e.target.value)}
+              sx={{ mb: 2, '& .MuiOutlinedInput-root': { borderRadius: '16px', bgcolor: '#F8FAFC' } }}
+              required
+            />
+            <TextField
+              margin="normal"
+              fullWidth
+              label="Username"
+              disabled={isFormDisabled}
+              value={registerUsername}
+              onChange={(e) => setRegisterUsername(e.target.value.toLowerCase())}
+              sx={{ mb: 2, '& .MuiOutlinedInput-root': { borderRadius: '16px', bgcolor: '#F8FAFC' } }}
+              required
+            />
+            <TextField
+              margin="normal"
+              fullWidth
+              label="User ID"
+              disabled={isFormDisabled}
+              value={registerUserId}
+              onChange={(e) => setRegisterUserId(e.target.value)}
+              sx={{ mb: 2, '& .MuiOutlinedInput-root': { borderRadius: '16px', bgcolor: '#F8FAFC' } }}
+              required
+            />
+            <TextField
+              margin="normal"
+              fullWidth
+              label="Email"
+              type="email"
+              disabled={isFormDisabled}
+              value={registerEmail}
+              onChange={(e) => setRegisterEmail(e.target.value)}
+              autoComplete="email"
+              sx={{ mb: 2, '& .MuiOutlinedInput-root': { borderRadius: '16px', bgcolor: '#F8FAFC' } }}
+              required
+            />
+            <TextField
+              margin="normal"
+              fullWidth
+              label="Password"
+              disabled={isFormDisabled}
+              type={showPassword ? 'text' : 'password'}
+              value={registerPassword}
+              onChange={(e) => setRegisterPassword(e.target.value)}
+              sx={{ mb: 2, '& .MuiOutlinedInput-root': { borderRadius: '16px', bgcolor: '#F8FAFC' } }}
+              required
+            />
+            <TextField
+              margin="normal"
+              fullWidth
+              label="Confirm Password"
+              disabled={isFormDisabled}
+              type={showPassword ? 'text' : 'password'}
+              value={registerConfirmPassword}
+              onChange={(e) => setRegisterConfirmPassword(e.target.value)}
+              sx={{ mb: 3, '& .MuiOutlinedInput-root': { borderRadius: '16px', bgcolor: '#F8FAFC' } }}
+              required
+            />
+
+            <Button
+              type="submit"
+              fullWidth
+              variant="contained"
+              disabled={isFormDisabled}
+              sx={{
+                py: 2,
+                fontWeight: 800,
+                fontSize: '1rem',
+                borderRadius: '16px',
+                textTransform: 'none',
+                bgcolor: '#006BFF',
+                boxShadow: '0 10px 15px -3px rgba(0, 107, 255, 0.3)',
+                '&:hover': { bgcolor: '#0052CC', boxShadow: '0 20px 25px -5px rgba(0, 107, 255, 0.4)' }
+              }}
+            >
+              {loading ? 'Creating Account...' : 'Create Account'}
+            </Button>
+          </Box>
+        )}
+
+        <Box mt={3}>
           <Button
-            type="submit"
+            variant="text"
             fullWidth
-            variant="contained"
             disabled={isFormDisabled}
-            sx={{
-              py: 2,
-              fontWeight: 800,
-              fontSize: '1rem',
-              borderRadius: '16px',
-              textTransform: 'none',
-              bgcolor: '#006BFF',
-              boxShadow: '0 10px 15px -3px rgba(0, 107, 255, 0.3)',
-              '&:hover': { bgcolor: '#0052CC', boxShadow: '0 20px 25px -5px rgba(0, 107, 255, 0.4)' }
+            onClick={() => {
+              setError('');
+              setMode((m) => (m === 'login' ? 'register' : 'login'));
             }}
+            sx={{ textTransform: 'none', fontWeight: 700 }}
           >
-            {loading ? 'Authenticating...' : 'Sign In'}
+            {mode === 'login' ? 'New here? Create an account' : 'Already have an account? Sign in'}
           </Button>
         </Box>
-        
+
         <Box mt={6} textAlign="center">
           <Typography variant="caption" color="#94A3B8" fontWeight={600}>
             © {new Date().getFullYear()} Daily Expense System. All rights reserved.

@@ -1,14 +1,13 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { db } from "@/lib/firebase";
+import { useAuthContext } from "@/components/AuthProvider";
 import dayjs from "dayjs";
 
 import {
   collection,
-  addDoc,
   getDocs,
-  updateDoc,
   doc,
   getDoc,
   query,
@@ -16,15 +15,43 @@ import {
 } from "firebase/firestore";
 import { PAGE_SIZE, sanitizeKey, unsanitizeKey } from "@/utils/KeySanitizer";
 import { sendTelegramNotification, formatExpenseMessage } from "@/utils/telegramService";
+import { invalidateFamilyCache } from "@/services/charts.services";
+import { cachedFetch } from "@/utils/clientCache";
+
+const LIST_CACHE_TTL = 30 * 60_000;
+
+const FAMILY_DATA_CACHE_TTL_MS = 20_000;
+
+type FamilyDataCacheEntry = {
+  ts: number;
+  rows: Record<string, any>[];
+  config: any;
+};
+
+const familyDataCache = new Map<string, FamilyDataCacheEntry>();
+
+// Module-level cache for dropdown/settings so Firestore isn't re-read on every mount
+type SettingsCacheEntry = {
+  ts: number;
+  incomeCategories: string[];
+  expenseCategories: string[];
+};
+const settingsCache = new Map<string, SettingsCacheEntry>();
+const SETTINGS_CACHE_TTL_MS = 30 * 60_000;
 
 export function useExpenseData(options?: { 
   paymentMethodFilter?: string | string[], 
   balanceType?: 'bank' | 'cash',
   bankId?: string,
-  statusFilter?: 'all' | 'active' | 'inactive'
+  statusFilter?: 'all' | 'active' | 'inactive',
+  familyId?: string, // allow override for testing, else use from auth
+  useServerPagination?: boolean,
 }) {
+  const { user, currentFamilyId, loading: authLoading } = useAuthContext();
+  const useServerPagination = options?.useServerPagination === true;
+  const familyId = options?.familyId || currentFamilyId;
   const [allRows, setAllRows] = useState<Record<string, any>[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [balanceRecords, setBalanceRecords] = useState<{year: number, month: number, amount: number}[]>([]);
   const [filters, setFilters] = useState({
@@ -35,90 +62,133 @@ export function useExpenseData(options?: {
     year: new Date().getFullYear(),
     statusFilter: "active"
   });
+  const [serverRows, setServerRows] = useState<Record<string, any>[]>([]);
+  const [serverTotalRows, setServerTotalRows] = useState(0);
+  const [serverUniqueDescriptions, setServerUniqueDescriptions] = useState<string[]>([]);
+  const [serverStats, setServerStats] = useState<any>({
+    weeklyIncome: 0,
+    weeklyExpense: 0,
+    monthlyIncome: 0,
+    monthlyExpense: 0,
+    totalIncome: 0,
+    totalExpense: 0,
+    startingBalance: 0,
+    currentBalance: 0,
+    startingBalanceKHR: 0,
+    monthlyIncomeKHR: 0,
+    monthlyExpenseKHR: 0,
+    currentBalanceKHR: 0,
+  });
+  const [serverFilteredStats, setServerFilteredStats] = useState<any>({
+    totalDebit: 0,
+    totalCredit: 0,
+    totalDebitKHR: 0,
+    totalCreditKHR: 0,
+  });
+  const paymentMethodsParam = Array.isArray(options?.paymentMethodFilter)
+    ? [...options.paymentMethodFilter].join("|")
+    : options?.paymentMethodFilter || "";
+  const balanceTypeParam = options?.balanceType || "bank";
+  const bankIdParam = options?.bankId || "";
+  const optionStatusParam = options?.statusFilter || "active";
 
-  const fetchAllData = useCallback(async () => {
+  const getAuthHeaders = useCallback(async () => {
+    const token = await user?.getIdToken();
+    if (!token) throw new Error("Authentication token is missing.");
+    return {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    };
+  }, [user]);
+
+  const fetchAllData = useCallback(async (forceRefresh = false) => {
+    if (authLoading) {
+      setLoading(true);
+      return;
+    }
+
     setLoading(true);
     try {
-      // Fetch Expenses
-      const q = query(
-        collection(db, "expenses"),
-        orderBy("Date", "desc"),
-        orderBy("createdAt", "desc")
-      );
-      const snapshot = await getDocs(q);
-      const data = snapshot.docs.map((doc) => {
-        const raw = doc.data();
-        const mapped: { id: string; [key: string]: any } = { id: doc.id };
-        for (const key of Object.keys(raw)) {
-          const uiKey = unsanitizeKey(key);
-          if (uiKey === "Amount") {
-            mapped["Amount (Income/Expense)"] = raw[key];
-          } else {
-            mapped[uiKey] = raw[key];
+      if (!familyId) {
+        setAllRows([]);
+        setBalanceRecords([]);
+        return;
+      }
+      const cached = !forceRefresh ? familyDataCache.get(familyId) : null;
+      const hasFreshCache =
+        !!cached && Date.now() - cached.ts <= FAMILY_DATA_CACHE_TTL_MS;
+
+      let data: Record<string, any>[] = [];
+      let config: any = null;
+
+      if (hasFreshCache && cached) {
+        data = cached.rows;
+        config = cached.config;
+      } else {
+        // Fetch Expenses from new path
+        const q = query(
+          collection(db, "families", familyId, "expenses"),
+          orderBy("Date", "desc"),
+          orderBy("createdAt", "desc")
+        );
+        const snapshot = await getDocs(q);
+        data = snapshot.docs.map((doc) => {
+          const raw = doc.data();
+          const mapped: { id: string; [key: string]: any } = { id: doc.id };
+          for (const key of Object.keys(raw)) {
+            const uiKey = unsanitizeKey(key);
+            if (uiKey === "Amount") {
+              mapped["Amount (Income/Expense)"] = raw[key];
+            } else {
+              mapped[uiKey] = raw[key];
+            }
           }
-        }
-        if (!mapped["Type"]) mapped["Type"] = "Expense";
-        return mapped;
-      });
+          if (!mapped["Type"]) mapped["Type"] = "Expense";
+          return mapped;
+        });
+
+        const configDoc = await getDoc(doc(db, 'families', familyId, 'settings', 'config'));
+        config = configDoc.exists() ? configDoc.data() : null;
+
+        familyDataCache.set(familyId, {
+          ts: Date.now(),
+          rows: data,
+          config,
+        });
+      }
+
       setAllRows(data);
 
-      // Fetch Balances
-      const balanceSnapshot = await getDocs(collection(db, "settings"));
-      let balancePrefix = "balance_";
-      if (options?.balanceType === 'cash') {
-        balancePrefix = "cash_balance_";
-      } else if (options?.bankId) {
-        balancePrefix = `balance_${options.bankId}_`;
+      // Build balances from cached or fetched family-scoped config.
+      let balances: {year: number, month: number, amount: number, amountKHR: number}[] = [];
+      if (config) {
+        const familyBankBalances = Array.isArray(config?.balances) ? config.balances : [];
+        const familyCashBalances = Array.isArray(config?.cashBalances) ? config.cashBalances : [];
+
+        if (options?.balanceType === 'cash') {
+          balances = familyCashBalances
+            .map((b: any) => ({
+              year: Number(b.year),
+              month: Number(b.month),
+              amount: Number(b.amount || 0),
+              amountKHR: Number(b.amountKHR || 0),
+            }))
+            .filter((b: {year: number; month: number}) => Number.isFinite(b.year) && Number.isFinite(b.month))
+            .sort((a: {year: number; month: number}, b: {year: number; month: number}) => (a.year * 12 + a.month) - (b.year * 12 + b.month));
+        } else {
+          balances = familyBankBalances
+            .filter((b: any) => !options?.bankId || b.bankId === options.bankId)
+            .map((b: any) => ({
+              year: Number(b.year),
+              month: Number(b.month),
+              amount: Number(b.amount || 0),
+              amountKHR: Number(b.amountKHR || 0),
+            }))
+            .filter((b: {year: number; month: number}) => Number.isFinite(b.year) && Number.isFinite(b.month))
+            .sort((a: {year: number; month: number}, b: {year: number; month: number}) => (a.year * 12 + a.month) - (b.year * 12 + b.month));
+        }
       }
 
-      let balances = balanceSnapshot.docs
-        .filter(d => d.id.startsWith(balancePrefix))
-        .map(d => {
-          const parts = d.id.split("_");
-          let year, month;
-          
-          if (parts.length === 4) {
-            // Format: balance_bankId_YYYY_MM or cash_balance_YYYY_MM
-            year = parseInt(parts[2]);
-            month = parseInt(parts[3]);
-          } else if (parts.length === 3) {
-            // Format: balance_YYYY_MM
-            year = parseInt(parts[1]);
-            month = parseInt(parts[2]);
-          } else {
-            return null;
-          }
-
-          if (isNaN(year) || isNaN(month)) return null;
-
-          return { 
-            year, 
-            month, 
-            amount: parseFloat(d.data().amount || 0),
-            amountKHR: parseFloat(d.data().amountKHR || 0)
-          };
-        })
-        .filter((b): b is {year: number, month: number, amount: number, amountKHR: number} => b !== null)
-        .sort((a, b) => (a.year * 12 + a.month) - (b.year * 12 + b.month));
-      
-      // Fallback for Chip Mong: if no chip-mong specific balance, try the generic one
-      if (options?.bankId === 'chip-mong' && balances.length === 0) {
-        balances = balanceSnapshot.docs
-          .filter(d => d.id.startsWith("balance_") && !d.id.includes("chip-mong") && !d.id.includes("cimb") && !d.id.includes("aba") && !d.id.includes("acleda"))
-          .map(d => {
-            const parts = d.id.split("_");
-            if (parts.length !== 3) return null;
-            return {
-              year: parseInt(parts[1]),
-              month: parseInt(parts[2]),
-              amount: parseFloat(d.data().amount || 0),
-              amountKHR: parseFloat(d.data().amountKHR || 0)
-            };
-          })
-          .filter((b): b is {year: number, month: number, amount: number, amountKHR: number} => b !== null)
-          .sort((a, b) => (a.year * 12 + a.month) - (b.year * 12 + b.month));
-      }
-      
       setBalanceRecords(balances);
 
     } catch (err) {
@@ -126,7 +196,7 @@ export function useExpenseData(options?: {
     } finally {
       setLoading(false);
     }
-  }, [options?.balanceType, options?.bankId]);
+  }, [authLoading, familyId, options?.balanceType, options?.bankId]);
 
   const filteredRows = useMemo(() => {
     return allRows.filter((row) => {
@@ -344,19 +414,81 @@ export function useExpenseData(options?: {
   }, [filteredRows]);
 
   const paginatedRows = useMemo(() => {
+    if (useServerPagination) return serverRows;
     const start = (page - 1) * PAGE_SIZE;
     // Don't filter inactive here - statusFilter is already applied in filteredRows
     return filteredRows.slice(start, start + PAGE_SIZE);
-  }, [filteredRows, page]);
+  }, [filteredRows, page, serverRows, useServerPagination]);
+
+  const filtersRef = React.useRef(filters);
+  filtersRef.current = filters;
 
   const fetchRows = useCallback(
     async (pageNumber: number, newFilters?: typeof filters) => {
+      const effectiveFilters = newFilters || filtersRef.current;
       if (newFilters) {
-        setFilters(newFilters);
+        setFilters((prev) => {
+          const isSame =
+            prev.searchText === newFilters.searchText &&
+            prev.date === newFilters.date &&
+            prev.typeFilter === newFilters.typeFilter &&
+            prev.month === newFilters.month &&
+            prev.year === newFilters.year &&
+            prev.statusFilter === newFilters.statusFilter;
+          return isSame ? prev : newFilters;
+        });
       }
       setPage(pageNumber);
+
+      if (!useServerPagination) return;
+      if (authLoading || !familyId) return;
+
+      setLoading(true);
+      try {
+        const headers = await getAuthHeaders();
+        const params = new URLSearchParams({
+          page: String(pageNumber),
+          pageSize: String(PAGE_SIZE),
+          month: String(effectiveFilters.month),
+          year: String(effectiveFilters.year),
+          date: effectiveFilters.date || "",
+          searchText: effectiveFilters.searchText || "",
+          typeFilter: effectiveFilters.typeFilter || "All",
+          statusFilter: (effectiveFilters.statusFilter || optionStatusParam) as string,
+          paymentMethods: paymentMethodsParam,
+          balanceType: balanceTypeParam,
+          bankId: bankIdParam,
+        });
+
+        const cacheKey = `/api/families/${familyId}/expenses?${params.toString()}`;
+        const payload = await cachedFetch(cacheKey, LIST_CACHE_TTL, async () => {
+          const res = await fetch(cacheKey, { method: "GET", headers });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data?.error || "Failed to fetch expenses.");
+          return data;
+        });
+
+        setServerRows(Array.isArray(payload?.rows) ? payload.rows : []);
+        setServerTotalRows(Number(payload?.totalRows || 0));
+        setServerStats((prev: any) => payload?.stats || prev);
+        setServerFilteredStats((prev: any) => payload?.filteredStats || prev);
+        setServerUniqueDescriptions(Array.isArray(payload?.uniqueDescriptions) ? payload.uniqueDescriptions : []);
+      } catch (err) {
+        console.error("Error fetching paginated rows:", err);
+      } finally {
+        setLoading(false);
+      }
     },
-    []
+    [
+      authLoading,
+      familyId,
+      getAuthHeaders,
+      balanceTypeParam,
+      bankIdParam,
+      optionStatusParam,
+      paymentMethodsParam,
+      useServerPagination,
+    ]
   );
 
   const [dropdownOptions, setDropdownOptions] = useState<Record<string, string[]>>({
@@ -369,47 +501,94 @@ export function useExpenseData(options?: {
   });
 
   useEffect(() => {
+    if (authLoading || !currentFamilyId) return;
+
+    const cached = settingsCache.get(currentFamilyId);
+    if (cached && Date.now() - cached.ts < SETTINGS_CACHE_TTL_MS) {
+      setDropdownOptions(prev => ({
+        ...prev,
+        "incomeCategories": cached.incomeCategories,
+        "expenseCategories": cached.expenseCategories,
+        "Category": [...new Set([...cached.incomeCategories, ...cached.expenseCategories])]
+      }));
+      return;
+    }
+
     async function fetchSettings() {
       try {
-        const incomeDoc = await getDoc(doc(db, 'settings', 'incomeTypes'));
-        const expenseDoc = await getDoc(doc(db, 'settings', 'expenseTypes'));
-        
-        // Also fetch from income_configs collection for the new names
-        const incomeConfigsSnap = await getDocs(collection(db, 'income_configs'));
-        const configNames = incomeConfigsSnap.docs.map(d => d.data().name);
-        
-        const incomeTypes = incomeDoc.exists() ? incomeDoc.data().types || [] : [];
-        const expenseTypes = expenseDoc.exists() ? expenseDoc.data().types || [] : [];
-        
-        const allIncomeNames = [...new Set([...incomeTypes, ...configNames])];
+        const configDoc = await getDoc(doc(db, 'families', currentFamilyId!, 'settings', 'config'));
+        if (!configDoc.exists()) return;
+        const config = configDoc.data();
 
+        const toStringList = (value: any): string[] => {
+          if (Array.isArray(value)) {
+            return value
+              .map((item) => {
+                if (typeof item === 'string') return item;
+                if (item && typeof item === 'object') {
+                  return item.name || item.label || item.value || null;
+                }
+                return null;
+              })
+              .filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+          }
+          if (value && typeof value === 'object') {
+            return Object.keys(value).filter((key) => key.trim().length > 0);
+          }
+          return [];
+        };
+
+        const storedIncomeNames = toStringList(config.incomeTypes);
+        const incomeCategories = storedIncomeNames.length > 0
+          ? storedIncomeNames
+          : toStringList(config.incomeConfigs);
+        const expenseCategories = toStringList(config.expenseTypes);
+
+        settingsCache.set(currentFamilyId!, { ts: Date.now(), incomeCategories, expenseCategories });
         setDropdownOptions(prev => ({
           ...prev,
-          "incomeCategories": allIncomeNames,
-          "expenseCategories": expenseTypes,
-          "Category": [...new Set([...allIncomeNames, ...expenseTypes])]
+          "incomeCategories": incomeCategories,
+          "expenseCategories": expenseCategories,
+          "Category": [...new Set([...incomeCategories, ...expenseCategories])]
         }));
       } catch (err) {
         console.error("Error fetching category settings:", err);
       }
     }
     fetchSettings();
-  }, []);
+  }, [authLoading, currentFamilyId]);
 
     const saveEntry = async (id: string | null, data: Record<string, any>, sendNotification: boolean = true) => {
       setSaving(true);
       try {
+        if (!familyId) throw new Error("No familyId set");
+        const headers = await getAuthHeaders();
         if (id) {
-          await updateDoc(doc(db, "expenses", id), data);
-        } else {
-          // Ensure new entries are active and have createdAt
-          await addDoc(collection(db, "expenses"), { 
-            ...data, 
-            status: 'active',
-            createdAt: new Date().toISOString()
+          const res = await fetch(`/api/families/${familyId}/expenses/${id}`, {
+            method: "PATCH",
+            headers,
+            body: JSON.stringify({ data }),
           });
+          const payload = await res.json();
+          if (!res.ok) throw new Error(payload?.error || "Failed to update expense.");
+        } else {
+          const res = await fetch(`/api/families/${familyId}/expenses`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+              data: {
+                ...data,
+                status: 'active',
+                createdAt: new Date().toISOString()
+              }
+            }),
+          });
+          const payload = await res.json();
+          if (!res.ok) throw new Error(payload?.error || "Failed to create expense.");
         }
-  
+
+        invalidateFamilyCache(familyId);
+
         // Send Telegram Notification if enabled
         if (sendNotification) {
           const message = formatExpenseMessage(
@@ -420,8 +599,12 @@ export function useExpenseData(options?: {
           await sendTelegramNotification(message);
         }
   
-        // Re-fetch everything immediately to update the list
-        await fetchAllData();
+        // Re-fetch data immediately to update the list
+        if (useServerPagination) {
+          await fetchRows(page, filters);
+        } else {
+          await fetchAllData(true);
+        }
         return true;
       } catch (err: any) {
         console.error("Error saving entry:", err);
@@ -447,11 +630,21 @@ export function useExpenseData(options?: {
   const deactivateEntry = async (id: string, sendNotification: boolean = true) => {
     try {
       // Fetch record data first for notification
-      const recordRef = doc(db, "expenses", id);
+      if (!familyId) throw new Error("No familyId set");
+      const recordRef = doc(db, "families", familyId, "expenses", id);
       const recordSnap = await getDoc(recordRef);
       const recordData = recordSnap.exists() ? recordSnap.data() : null;
 
-      await updateDoc(recordRef, { status: 'inactive' });
+      const headers = await getAuthHeaders();
+      const res = await fetch(`/api/families/${familyId}/expenses/${id}`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ data: { status: 'inactive' } }),
+      });
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload?.error || "Failed to deactivate expense.");
+
+      invalidateFamilyCache(familyId);
 
       // Send Telegram Notification if enabled
       if (sendNotification && recordData) {
@@ -470,8 +663,12 @@ export function useExpenseData(options?: {
         await sendTelegramNotification(message);
       }
 
-      // Re-fetch everything immediately to update the list
-      await fetchAllData();
+      // Re-fetch data immediately to update the list
+      if (useServerPagination) {
+        await fetchRows(page, filters);
+      } else {
+        await fetchAllData(true);
+      }
       return true;
     } catch (err) {
       console.error("Error deactivating entry:", err);
@@ -482,11 +679,21 @@ export function useExpenseData(options?: {
   const activateEntry = async (id: string, sendNotification: boolean = true) => {
     try {
       // Fetch record data first for notification
-      const recordRef = doc(db, "expenses", id);
+      if (!familyId) throw new Error("No familyId set");
+      const recordRef = doc(db, "families", familyId, "expenses", id);
       const recordSnap = await getDoc(recordRef);
       const recordData = recordSnap.exists() ? recordSnap.data() : null;
 
-      await updateDoc(recordRef, { status: 'active' });
+      const headers = await getAuthHeaders();
+      const res = await fetch(`/api/families/${familyId}/expenses/${id}`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ data: { status: 'active' } }),
+      });
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload?.error || "Failed to activate expense.");
+
+      invalidateFamilyCache(familyId);
 
       // Send Telegram Notification if enabled
       if (sendNotification && recordData) {
@@ -505,8 +712,12 @@ export function useExpenseData(options?: {
         await sendTelegramNotification(message);
       }
 
-      // Re-fetch everything immediately to update the list
-      await fetchAllData();
+      // Re-fetch data immediately to update the list
+      if (useServerPagination) {
+        await fetchRows(page, filters);
+      } else {
+        await fetchAllData(true);
+      }
       return true;
     } catch (err) {
       console.error("Error activating entry:", err);
@@ -515,22 +726,23 @@ export function useExpenseData(options?: {
   };
 
   useEffect(() => {
+    if (useServerPagination) return;
     fetchAllData();
-  }, [fetchAllData]);
+  }, [fetchAllData, useServerPagination]);
 
   return {
     rows: paginatedRows,
     loading,
     saving,
-    totalRows: filteredRows.length,
+    totalRows: useServerPagination ? serverTotalRows : filteredRows.length,
     fetchRows,
     dropdownOptions,
     saveEntry,
     deactivateEntry,
     activateEntry,
     refreshCount: fetchAllData,
-    stats,
-    filteredStats,
-    uniqueDescriptions,
+    stats: useServerPagination ? serverStats : stats,
+    filteredStats: useServerPagination ? serverFilteredStats : filteredStats,
+    uniqueDescriptions: useServerPagination ? serverUniqueDescriptions : uniqueDescriptions,
   };
 }

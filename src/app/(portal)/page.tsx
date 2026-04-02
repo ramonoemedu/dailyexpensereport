@@ -13,6 +13,8 @@ import { WeeksProfit } from "@/components/NextAdmin/Charts/weeks-profit";
 import { getClearPortStats } from "@/services/charts.services";
 import { Skeleton } from "@mui/material";
 import { cn } from "@/lib/NextAdmin/utils";
+import { useAuthContext } from "@/components/AuthProvider";
+import { FamilySwitcher } from "@/components/FamilySwitcher";
 
 export default function DashboardPage() {
   const [stats, setStats] = useState<any>(null);
@@ -21,13 +23,20 @@ export default function DashboardPage() {
   const [month, setMonth] = useState(new Date().getMonth());
   const [year, setYear] = useState(new Date().getFullYear());
   const [statusFilter, setStatusFilter] = useState<'active' | 'all'>('active');
+  const { currentFamilyId, loading: authLoading } = useAuthContext();
 
   useEffect(() => {
     let isMounted = true;
     async function loadStats() {
       setLoading(true);
       try {
-        const data = await getClearPortStats(month, year, { statusFilter });
+        console.log("currentFamilyId:", currentFamilyId);
+        if (!currentFamilyId) {
+          setStats(null);
+          return;
+        }
+
+        const data = await getClearPortStats(month, year, { statusFilter, familyId: currentFamilyId });
         if (isMounted) setStats(data);
       } catch (error) {
         console.error("Dashboard load error:", error);
@@ -35,9 +44,9 @@ export default function DashboardPage() {
         if (isMounted) setLoading(false);
       }
     }
-    loadStats();
+    if (!authLoading) loadStats();
     return () => { isMounted = false; };
-  }, [month, year, statusFilter]);
+  }, [month, year, statusFilter, currentFamilyId, authLoading]);
 
   const months = useMemo(() => [
     "January", "February", "March", "April", "May", "June",
@@ -45,6 +54,16 @@ export default function DashboardPage() {
   ], []);
 
   const years = [2024, 2025, 2026];
+
+  if (!loading && !stats) {
+    return (
+      <div className="mx-auto w-full max-w-full space-y-6 p-4 md:p-6">
+        <div className="rounded-2xl border border-stroke bg-white p-6 text-sm font-semibold text-gray-600 dark:border-dark-3 dark:bg-dark-2 dark:text-gray-300">
+          No family context found for this user. Please verify your system_users document has a families map or create a members doc at families/&lt;familyId&gt;/members/&lt;uid&gt;.
+        </div>
+      </div>
+    );
+  }
 
   if (loading || !stats) {
     return (
@@ -78,30 +97,33 @@ export default function DashboardPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-3 bg-white dark:bg-dark-2 p-2 rounded-2xl shadow-sm border border-stroke dark:border-dark-3">
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as 'active' | 'all')}
-            className="bg-transparent px-3 py-1 text-sm font-bold outline-none cursor-pointer border-r border-stroke dark:border-dark-3"
-          >
-            <option value="active">Active Only</option>
-            <option value="all">Include All</option>
-          </select>
-          <select
-            value={month}
-            onChange={(e) => setMonth(parseInt(e.target.value))}
-            className="bg-transparent px-3 py-1 text-sm font-bold outline-none cursor-pointer"
-          >
-            {months.map((m, i) => <option key={m} value={i}>{m}</option>)}
-          </select>
-          <div className="h-4 w-px bg-stroke dark:bg-dark-3" />
-          <select
-            value={year}
-            onChange={(e) => setYear(parseInt(e.target.value))}
-            className="bg-transparent px-3 py-1 text-sm font-bold outline-none cursor-pointer"
-          >
-            {years.map(y => <option key={y} value={y}>{y}</option>)}
-          </select>
+        <div className="flex items-center gap-3 flex-wrap">
+
+          <div className="flex items-center gap-3 bg-white dark:bg-dark-2 p-2 rounded-2xl shadow-sm border border-stroke dark:border-dark-3">
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as 'active' | 'all')}
+              className="bg-transparent px-3 py-1 text-sm font-bold outline-none cursor-pointer border-r border-stroke dark:border-dark-3"
+            >
+              <option value="active">Active Only</option>
+              <option value="all">Include All</option>
+            </select>
+            <select
+              value={month}
+              onChange={(e) => setMonth(parseInt(e.target.value))}
+              className="bg-transparent px-3 py-1 text-sm font-bold outline-none cursor-pointer"
+            >
+              {months.map((m, i) => <option key={m} value={i}>{m}</option>)}
+            </select>
+            <div className="h-4 w-px bg-stroke dark:bg-dark-3" />
+            <select
+              value={year}
+              onChange={(e) => setYear(parseInt(e.target.value))}
+              className="bg-transparent px-3 py-1 text-sm font-bold outline-none cursor-pointer"
+            >
+              {years.map(y => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </div>
         </div>
       </div>
 

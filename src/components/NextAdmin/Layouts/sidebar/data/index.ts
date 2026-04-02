@@ -41,7 +41,7 @@ export const NAV_DATA: NavSection[] = [
           //   icon: Icons.Table,
           // },
           {
-            title: "Daily Expense (Chip Mong)",
+            title: "Daily Expense",
             url: "/daily-expense/bank/chip-mong",
             icon: Icons.Table,
           },
@@ -72,7 +72,7 @@ export const NAV_DATA: NavSection[] = [
         icon: Icons.PieChart,
         items: [
           {
-            title: "Report (Chip Mong)",
+            title: "Report",
             url: "/reports/monthly/bank/chip-mong",
             icon: Icons.Table,
           },
@@ -105,6 +105,11 @@ export const NAV_DATA: NavSection[] = [
           {
             title: "User Management",
             url: "/settings/users",
+            icon: Icons.User,
+          },
+          {
+            title: "Family Management",
+            url: "/settings/families",
             icon: Icons.User,
           },
           {

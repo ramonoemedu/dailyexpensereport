@@ -17,9 +17,12 @@ import {
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
-import { db } from '@/lib/firebase';
+import { auth } from '@/lib/firebase';
+import { useAuthContext } from '@/components/AuthProvider';
 import { useToast } from '@/components/NextAdmin/ui/toast';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { cachedFetch, cacheInvalidate } from '@/utils/clientCache';
+
+const TYPES_CACHE_TTL = 30 * 60_000;
 
 export default function ExpenseTypesPage() {
   const [loading, setLoading] = useState(true);
@@ -27,30 +30,65 @@ export default function ExpenseTypesPage() {
   const [types, setTypes] = useState<string[]>([]);
   const [newType, setNewType] = useState('');
   const { showToast } = useToast();
+  const { currentFamilyId } = useAuthContext();
+
+  const getAuthHeaders = async () => {
+    const token = await auth.currentUser?.getIdToken();
+    if (!token) throw new Error('Authentication token is missing.');
+    return {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    };
+  };
 
   useEffect(() => {
     async function loadSettings() {
       setLoading(true);
       try {
-        const docSnap = await getDoc(doc(db, 'settings', 'expenseTypes'));
-        if (docSnap.exists()) {
-          setTypes(docSnap.data().types || []);
+        if (!currentFamilyId) {
+          setTypes([]);
+          return;
         }
+
+        const cacheKey = `expense-types:${currentFamilyId}`;
+        const types = await cachedFetch<string[]>(cacheKey, TYPES_CACHE_TTL, async () => {
+          const res = await fetch(`/api/families/${currentFamilyId}/settings/types`, {
+            method: 'GET',
+            headers: await getAuthHeaders(),
+          });
+          const payload = await res.json();
+          if (!res.ok) throw new Error(payload?.error || 'Failed to load expense types.');
+          return (payload?.expenseTypes || []) as string[];
+        });
+
+        setTypes(types);
       } catch (error) {
         console.error("Error loading expense types:", error);
+        showToast("Failed to load expense types.", "error");
       } finally {
         setLoading(false);
       }
     }
     loadSettings();
-  }, []);
+  }, [currentFamilyId, showToast]);
 
   const handleSave = async (updatedList: string[]) => {
     setSaving(true);
     try {
-      await setDoc(doc(db, 'settings', 'expenseTypes'), {
-        types: updatedList
+      if (!currentFamilyId) throw new Error('No familyId set');
+
+      const res = await fetch(`/api/families/${currentFamilyId}/settings/types`, {
+        method: 'PUT',
+        headers: await getAuthHeaders(),
+        body: JSON.stringify({ kind: 'expense', types: updatedList }),
       });
+
+      const payload = await res.json();
+      if (!res.ok) {
+        throw new Error(payload?.error || 'Failed to save expense types.');
+      }
+
+      cacheInvalidate(`expense-types:${currentFamilyId}`);
       showToast("Expense types updated.", "success");
     } catch (error) {
       console.error("Error saving expense types:", error);
@@ -111,9 +149,9 @@ export default function ExpenseTypesPage() {
               variant="contained"
               onClick={addType}
               startIcon={<AddIcon />}
-              sx={{ 
-                borderRadius: '12px', 
-                textTransform: 'none', 
+              sx={{
+                borderRadius: '12px',
+                textTransform: 'none',
                 bgcolor: '#006BFF',
                 px: 4,
                 fontWeight: 'bold'

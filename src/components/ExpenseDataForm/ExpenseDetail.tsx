@@ -18,8 +18,9 @@ import {
 import { DatePicker, LocalizationProvider } from "@mui/x-date-pickers";
 import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
 import dayjs from "dayjs";
-import { db } from "@/lib/firebase";
-import { doc, getDoc, updateDoc } from "firebase/firestore";
+import { auth, db } from "@/lib/firebase";
+import { doc, getDoc } from "firebase/firestore";
+import { useAuthContext } from "@/components/AuthProvider";
 import { columns, dateFields, dropdownFields, sanitizeKey, unsanitizeKey } from "@/utils/KeySanitizer";
 import saveAs from "file-saver";
 
@@ -35,11 +36,12 @@ const EmployeeDetail: React.FC<Props> = ({ id, open, onClose, onSaved, dropdownO
   const [item, setItem] = useState<Record<string, any> | null>(null);
   const [saving, setSaving] = useState(false);
 
+  const { currentFamilyId } = useAuthContext();
   useEffect(() => {
-    if (!id || !open) return;
+    if (!id || !open || !currentFamilyId) return;
     const load = async () => {
       try {
-        const d = await getDoc(doc(db, "expenses", id));
+        const d = await getDoc(doc(db, "families", currentFamilyId, "expenses", id));
         if (d.exists()) {
           const raw = d.data();
           const mapped: Record<string, any> = { id: d.id };
@@ -69,7 +71,7 @@ const EmployeeDetail: React.FC<Props> = ({ id, open, onClose, onSaved, dropdownO
       }
     };
     load();
-  }, [id, open]);
+  }, [id, open, currentFamilyId]);
 
   const handleChange = (key: string, value: any) => {
     setItem((prev) => ({ ...(prev || {}), [key]: value }));
@@ -95,7 +97,20 @@ const EmployeeDetail: React.FC<Props> = ({ id, open, onClose, onSaved, dropdownO
           sanitized[sanitizeKey(k)] = v;
         }
       });
-      await updateDoc(doc(db, "expenses", item.id), sanitized);
+      if (!currentFamilyId) throw new Error("No familyId set");
+      const token = await auth.currentUser?.getIdToken();
+      if (!token) throw new Error("Authentication token is missing.");
+
+      const res = await fetch(`/api/families/${currentFamilyId}/expenses/${item.id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ data: sanitized }),
+      });
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload?.error || "Failed to save detail.");
       if (onSaved) onSaved();
       onClose();
     } catch (err) {

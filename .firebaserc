@@ -1,0 +1,9 @@
+{
+  "projects": {
+    "dev": "daily-expense-report-dev",
+    "uat": "daily-expense-report-dev",
+    "prod": "daily-expense-report-2de2d"
+  },
+  "targets": {},
+  "etags": {}
+}
