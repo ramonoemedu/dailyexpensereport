@@ -11,27 +11,37 @@ type PropsType = {
   month?: number;
   year?: number;
   className?: string;
+  preloadedData?: { sales: any[]; revenue: any[] };
 };
 
-export function WeeksProfit({ className, month: propMonth, year: propYear }: PropsType) {
-  const [internalMonth, setInternalMonth] = useState(new Date().getMonth());
-  const [internalYear, setInternalYear] = useState(new Date().getFullYear());
+export function WeeksProfit({ className, month: propMonth, year: propYear, preloadedData }: PropsType) {
+  const [internalMonth, setInternalMonth] = useState(propMonth ?? new Date().getMonth());
+  const [internalYear, setInternalYear] = useState(propYear ?? new Date().getFullYear());
 
   const month = propMonth !== undefined ? propMonth : internalMonth;
   const year = propYear !== undefined ? propYear : internalYear;
 
-  const [data, setData] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<any>(preloadedData || null);
+  const [loading, setLoading] = useState(!preloadedData);
   const { currentFamilyId } = useAuthContext();
 
+  // Sync when parent passes updated preloaded data (matches current month/year)
   useEffect(() => {
+    if (preloadedData && propMonth === internalMonth && propYear === internalYear) {
+      setData(preloadedData);
+      setLoading(false);
+    }
+  }, [preloadedData, propMonth, propYear, internalMonth, internalYear]);
+
+  useEffect(() => {
+    // Skip fetching if we have preloaded data and the month/year hasn't changed from parent
+    const usingParentData = preloadedData && month === propMonth && year === propYear;
+    if (usingParentData) return;
+
     async function loadData() {
       setLoading(true);
       try {
-        if (!currentFamilyId) {
-          setData({ sales: [], revenue: [] });
-          return;
-        }
+        if (!currentFamilyId) { setData({ sales: [], revenue: [] }); return; }
         const result = await getWeeksProfitData(month, year, currentFamilyId);
         setData(result);
       } finally {
@@ -39,7 +49,7 @@ export function WeeksProfit({ className, month: propMonth, year: propYear }: Pro
       }
     }
     loadData();
-  }, [month, year, currentFamilyId]);
+  }, [month, year, currentFamilyId, preloadedData, propMonth, propYear]);
 
   if (loading || !data) {
     return (

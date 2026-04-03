@@ -10,7 +10,7 @@ import {
 } from "@/components/NextAdmin/Dashboard/overview-cards/icons";
 import { PaymentsOverview } from "@/components/NextAdmin/Charts/payments-overview";
 import { WeeksProfit } from "@/components/NextAdmin/Charts/weeks-profit";
-import { getClearPortStats } from "@/services/charts.services";
+import { getDashboardData, hasDashboardCache, onDashboardUpdate } from "@/services/charts.services";
 import { Skeleton } from "@mui/material";
 import { cn } from "@/lib/NextAdmin/utils";
 import { useAuthContext } from "@/components/AuthProvider";
@@ -18,25 +18,24 @@ import { FamilySwitcher } from "@/components/FamilySwitcher";
 
 export default function DashboardPage() {
   const [stats, setStats] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const { currentFamilyId, loading: authLoading } = useAuthContext();
 
   const [month, setMonth] = useState(new Date().getMonth());
   const [year, setYear] = useState(new Date().getFullYear());
   const [statusFilter, setStatusFilter] = useState<'active' | 'all'>('active');
-  const { currentFamilyId, loading: authLoading } = useAuthContext();
+
+  // Skip skeleton if we have pre-computed cached data for this view
+  const [loading, setLoading] = useState(
+    () => !hasDashboardCache(currentFamilyId ?? '', new Date().getFullYear(), new Date().getMonth(), 'active')
+  );
 
   useEffect(() => {
     let isMounted = true;
     async function loadStats() {
-      setLoading(true);
+      if (!hasDashboardCache(currentFamilyId ?? '', year, month, statusFilter)) setLoading(true);
       try {
-        console.log("currentFamilyId:", currentFamilyId);
-        if (!currentFamilyId) {
-          setStats(null);
-          return;
-        }
-
-        const data = await getClearPortStats(month, year, { statusFilter, familyId: currentFamilyId });
+        if (!currentFamilyId) { setStats(null); return; }
+        const data = await getDashboardData(month, year, currentFamilyId, statusFilter);
         if (isMounted) setStats(data);
       } catch (error) {
         console.error("Dashboard load error:", error);
@@ -45,7 +44,13 @@ export default function DashboardPage() {
       }
     }
     if (!authLoading) loadStats();
-    return () => { isMounted = false; };
+
+    // Subscribe to background revalidation updates
+    const unsub = onDashboardUpdate((updatedFamilyId) => {
+      if (isMounted && updatedFamilyId === currentFamilyId) loadStats();
+    });
+
+    return () => { isMounted = false; unsub(); };
   }, [month, year, statusFilter, currentFamilyId, authLoading]);
 
   const months = useMemo(() => [
@@ -55,7 +60,7 @@ export default function DashboardPage() {
 
   const years = [2024, 2025, 2026];
 
-  if (!loading && !stats) {
+  if (!authLoading && !currentFamilyId) {
     return (
       <div className="mx-auto w-full max-w-full space-y-6 p-4 md:p-6">
         <div className="rounded-2xl border border-stroke bg-white p-6 text-sm font-semibold text-gray-600 dark:border-dark-3 dark:bg-dark-2 dark:text-gray-300">
@@ -241,12 +246,12 @@ export default function DashboardPage() {
 
         {/* Payments Chart */}
         <div className="col-span-12 xl:col-span-8">
-          <PaymentsOverview year={year} />
+          <PaymentsOverview year={year} preloadedData={stats?.timeline} />
         </div>
 
         {/* Weekly Profit Chart */}
         <div className="col-span-12 xl:col-span-4">
-          <WeeksProfit month={month} year={year} />
+          <WeeksProfit month={month} year={year} preloadedData={stats?.categories} />
         </div>
 
         {/* --- Modern Income Breakdown Bento --- */}

@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo } from "react";
 import dayjs from "dayjs";
-import { getClearPortStats } from "@/services/charts.services";
+import { getBankReportData, hasBankReportCache, onBankReportUpdate } from "@/services/charts.services";
 import { Skeleton, Checkbox } from "@mui/material";
 import PrintIcon from '@mui/icons-material/Print';
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
@@ -35,7 +35,8 @@ export default function MonthlyReportPage() {
   const bankId = params?.bankId as string;
   const bankName = getBankName(bankId);
 
-  const [stats, setStats] = useState<any>(null);
+  const [allTransactions, setAllTransactions] = useState<any[]>([]);
+  const [startingBalance, setStartingBalance] = useState(0);
   const [loading, setLoading] = useState(true);
   const [month, setMonth] = useState(dayjs().month());
   const [year, setYear] = useState(dayjs().year());
@@ -52,34 +53,63 @@ export default function MonthlyReportPage() {
   const { currentFamilyId } = useAuthContext();
 
   useEffect(() => {
+    let isMounted = true;
     async function loadReport() {
-      setLoading(true);
+      if (!hasBankReportCache(currentFamilyId ?? '', bankId, year, month)) setLoading(true);
       try {
         if (!currentFamilyId) return;
-        const data = await getClearPortStats(month, year, {
-          paymentMethodFilter: [bankName],
-          currencyFilter: "USD",
-          bankId: bankId,
-          statusFilter: statusFilter,
-          familyId: currentFamilyId
-        });
-        setStats(data);
+        const data = await getBankReportData(currentFamilyId, bankId, year, month);
+        if (isMounted) {
+          setAllTransactions(data.transactions || []);
+          setStartingBalance(data.startingBalance || 0);
+        }
       } catch (error) {
         console.error("Report load error:", error);
       } finally {
-        setLoading(false);
+        if (isMounted) setLoading(false);
       }
     }
     if (currentFamilyId) loadReport();
-  }, [month, year, bankName, statusFilter, currentFamilyId]);
+
+    const unsub = onBankReportUpdate((updatedFamilyId) => {
+      if (isMounted && updatedFamilyId === currentFamilyId) loadReport();
+    });
+
+    return () => { isMounted = false; unsub(); };
+  }, [month, year, bankId, currentFamilyId]);
+
+  // Apply statusFilter client-side (data stored with all statuses)
+  const monthlyTransactionsList = useMemo(() => {
+    return allTransactions.filter((item: any) => {
+      if (statusFilter === 'all') return true;
+      return (item.status || 'active') === statusFilter;
+    });
+  }, [allTransactions, statusFilter]);
+
+  // Derive summary stats from the filtered list
+  const stats = useMemo(() => {
+    let monthlyIncome = 0, monthlyAmount = 0;
+    const categoryTotals: Record<string, number> = {};
+    monthlyTransactionsList.forEach((item: any) => {
+      if (item.isFuture) return;
+      if (item.Type === 'Income') monthlyIncome += item.Amount;
+      else {
+        monthlyAmount += item.Amount;
+        categoryTotals[item.Category] = (categoryTotals[item.Category] || 0) + item.Amount;
+      }
+    });
+    const sortedCategories = Object.entries(categoryTotals)
+      .sort(([, a], [, b]) => (b as number) - (a as number))
+      .map(([name, value]) => ({ name, value }));
+    return { monthlyIncome, monthlyAmount, startingBalance, sortedCategories, monthlyTransactionsList };
+  }, [monthlyTransactionsList, startingBalance]);
 
   const filteredTransactions = useMemo(() => {
-    if (!stats?.monthlyTransactionsList) return [];
-    return stats.monthlyTransactionsList.filter((item: any) => {
+    return monthlyTransactionsList.filter((item: any) => {
       if (dateFilter && item.Date !== dateFilter) return false;
       return true;
     });
-  }, [stats, dateFilter]);
+  }, [monthlyTransactionsList, dateFilter]);
 
   const dailyStats = useMemo(() => {
     const result = { debit: 0, credit: 0 };
@@ -91,17 +121,16 @@ export default function MonthlyReportPage() {
   }, [filteredTransactions]);
 
   const selectedTotal = useMemo(() => {
-    if (!stats?.monthlyTransactionsList) return 0;
-    return stats.monthlyTransactionsList
+    return monthlyTransactionsList
       .filter((item: any) => selectedIds.includes(item.id))
       .reduce((acc: number, item: any) => {
         return item.Type === "Income" ? acc + item.Amount : acc - item.Amount;
       }, 0);
-  }, [stats, selectedIds]);
+  }, [monthlyTransactionsList, selectedIds]);
 
   const handleExportExcel = async () => {
     const dataToExport = selectedIds.length > 0
-      ? stats.monthlyTransactionsList.filter((r: any) => selectedIds.includes(r.id))
+      ? monthlyTransactionsList.filter((r: any) => selectedIds.includes(r.id))
       : filteredTransactions;
 
     await generateExcel("Monthly Financial Report", ["Date", "Description", "Payment Method", "Category", "Type", "Currency", "Debit", "Credit"], dataToExport, bankName);
@@ -109,7 +138,7 @@ export default function MonthlyReportPage() {
 
   const handleExportPdf = () => {
     const dataToExport = selectedIds.length > 0
-      ? stats.monthlyTransactionsList.filter((r: any) => selectedIds.includes(r.id))
+      ? monthlyTransactionsList.filter((r: any) => selectedIds.includes(r.id))
       : filteredTransactions;
 
     generatePdf("Monthly Financial Report", ["Date", "Description", "Payment Method", "Category", "Type", "Currency", "Debit", "Credit"], dataToExport, bankName);
@@ -117,7 +146,7 @@ export default function MonthlyReportPage() {
 
   const handleSelectAll = (checked: boolean) => {
     if (checked && stats?.monthlyTransactionsList) {
-      setSelectedIds(stats.monthlyTransactionsList.map((item: any) => item.id));
+      setSelectedIds(monthlyTransactionsList.map((item: any) => item.id));
     } else {
       setSelectedIds([]);
     }
@@ -131,7 +160,7 @@ export default function MonthlyReportPage() {
     }
   };
 
-  if (loading || !stats) {
+  if (loading && allTransactions.length === 0) {
     return (
       <div className="space-y-6 p-6">
         <Skeleton variant="rectangular" height={100} className="rounded-3xl" />
@@ -144,17 +173,7 @@ export default function MonthlyReportPage() {
     );
   }
 
-  // Compute closing balance from the full transaction list (includes future-dated entries)
-  // so it matches the server API which counts all transactions in the month.
-  const { totalMonthlyIncome, totalMonthlyExpense } = (stats.monthlyTransactionsList as any[] ?? []).reduce(
-    (acc: { totalMonthlyIncome: number; totalMonthlyExpense: number }, item: any) => {
-      if (item.Type === 'Income') acc.totalMonthlyIncome += item.Amount;
-      else acc.totalMonthlyExpense += item.Amount;
-      return acc;
-    },
-    { totalMonthlyIncome: 0, totalMonthlyExpense: 0 }
-  );
-  const netSavings = totalMonthlyIncome - totalMonthlyExpense;
+  const netSavings = stats.monthlyIncome - stats.monthlyAmount;
   const currentBankBalance = (stats.startingBalance || 0) + netSavings;
 
   const formatValue = (val: number, itemCurrency: string = "USD") => {
@@ -396,7 +415,7 @@ export default function MonthlyReportPage() {
 
                 {(() => {
                   let runningBalance = stats.startingBalance || 0;
-                  return stats.monthlyTransactionsList?.map((item: any, idx: number) => {
+                  return monthlyTransactionsList?.map((item: any, idx: number) => {
                     const isIncome = item.Type === "Income";
                     isIncome ? runningBalance += item.Amount : runningBalance -= item.Amount;
 

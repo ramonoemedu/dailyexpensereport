@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAdminDb } from "@/lib/firebaseAdmin";
 import { unsanitizeKey } from "@/utils/KeySanitizer";
 import { verifyFamilyAccess } from "@/lib/verifyFamilyAccess";
+import { rebuildMonthReport, rebuildBankReport } from "@/lib/dashboardReport";
+import { BANKS } from "@/utils/bankConstants";
 
 function toInt(value: string | null, fallback: number) {
   const n = Number(value);
@@ -248,6 +250,18 @@ export async function POST(
     };
 
     const ref = await getAdminDb().collection("families").doc(familyId).collection("expenses").add(payload);
+
+    // Rebuild dashboard + bank reports for the expense's month
+    const dateStr = String(data.Date || '');
+    if (dateStr) {
+      const d = new Date(dateStr);
+      if (!isNaN(d.getTime())) {
+        const y = d.getFullYear(), m = d.getMonth();
+        rebuildMonthReport(familyId, y, m).catch(() => {});
+        BANKS.forEach(b => rebuildBankReport(familyId, b.id, y, m).catch(() => {}));
+      }
+    }
+
     return NextResponse.json({ id: ref.id }, { status: 201 });
   } catch (error: any) {
     return NextResponse.json({ error: error?.message || "Failed to create expense." }, { status: 500 });

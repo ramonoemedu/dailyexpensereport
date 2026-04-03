@@ -1,17 +1,13 @@
 /**
- * Sync Production expenses → UAT "My Family"
+ * Sync Production → UAT (full family data)
  *
  * What it does:
- *   1. Reads ALL expenses from PROD  families/HfLedbulpkLaeFMXwkVK/expenses
- *   2. Deletes ALL expenses in UAT   families/HfLedbulpkLaeFMXwkVK/expenses
- *   3. Writes the prod docs into UAT (same document IDs preserved)
+ *   1. Copies families doc
+ *   2. Deletes + rewrites all expenses
+ *   3. Copies settings/config (balances, expenseTypes)
+ *   4. Syncs system_users (families map)
  *
- * Usage:
- *   node scripts/sync-prod-to-uat-expenses.js
- *
- * Requirements:
- *   - .env.production must have FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY
- *   - serviceAccountKey.json (UAT dev project) must exist in project root
+ * Usage: node scripts/sync-prod-to-uat-expenses.js
  */
 
 const admin = require('firebase-admin');
@@ -21,88 +17,76 @@ const fs = require('fs');
 const FAMILY_ID = 'HfLedbulpkLaeFMXwkVK';
 const BATCH_SIZE = 400;
 
-// --- Init PROD app (serviceAccountKeyProd.json) ---
-const saProdPath = path.resolve(__dirname, '../serviceAccountKeyProd.json');
-if (!fs.existsSync(saProdPath)) {
-  console.error('ERROR: serviceAccountKeyProd.json not found at project root');
-  process.exit(1);
-}
-const saProd = require(saProdPath);
+// Init PROD
+const saProd = require(path.resolve(__dirname, '../serviceAccountKeyProd.json'));
 const prodApp = admin.initializeApp({ credential: admin.credential.cert(saProd) }, 'prod');
 const prodDb = admin.firestore(prodApp);
 
-// --- Init UAT app (serviceAccountKey.json) ---
-const saPath = path.resolve(__dirname, '../serviceAccountKey.json');
-if (!fs.existsSync(saPath)) {
-  console.error('ERROR: serviceAccountKey.json not found at project root');
-  process.exit(1);
-}
-const sa = require(saPath);
-const uatApp = admin.initializeApp({ credential: admin.credential.cert(sa) }, 'uat');
+// Init UAT
+const saUat = require(path.resolve(__dirname, '../serviceAccountKey.json'));
+const uatApp = admin.initializeApp({ credential: admin.credential.cert(saUat) }, 'uat');
 const uatDb = admin.firestore(uatApp);
 
-async function deleteInBatches(db, collectionRef, label) {
-  const snap = await collectionRef.get();
-  if (snap.empty) {
-    console.log(`  ${label}: nothing to delete.`);
-    return 0;
-  }
-  const docs = snap.docs;
-  let deleted = 0;
-  for (let i = 0; i < docs.length; i += BATCH_SIZE) {
-    const batch = db.batch();
-    docs.slice(i, i + BATCH_SIZE).forEach(d => batch.delete(d.ref));
+async function deleteAll(ref) {
+  const snap = await ref.get();
+  if (snap.empty) return 0;
+  for (let i = 0; i < snap.docs.length; i += BATCH_SIZE) {
+    const batch = uatDb.batch();
+    snap.docs.slice(i, i + BATCH_SIZE).forEach(d => batch.delete(d.ref));
     await batch.commit();
-    deleted += Math.min(BATCH_SIZE, docs.length - i);
-    console.log(`  Deleted ${deleted}/${docs.length} UAT expense docs...`);
   }
-  return deleted;
+  return snap.size;
 }
 
-async function writeInBatches(db, collectionRef, docs, label) {
-  let written = 0;
+async function writeAll(colRef, docs) {
   for (let i = 0; i < docs.length; i += BATCH_SIZE) {
-    const batch = db.batch();
-    docs.slice(i, i + BATCH_SIZE).forEach(d => {
-      batch.set(collectionRef.doc(d.id), d.data());
-    });
+    const batch = uatDb.batch();
+    docs.slice(i, i + BATCH_SIZE).forEach(d => batch.set(colRef.doc(d.id), d.data()));
     await batch.commit();
-    written += Math.min(BATCH_SIZE, docs.length - i);
-    console.log(`  Wrote ${written}/${docs.length} docs to UAT...`);
+    console.log(`  wrote ${Math.min(i + BATCH_SIZE, docs.length)}/${docs.length}`);
   }
-  return written;
 }
 
 (async () => {
-  console.log('\n=== Sync PROD → UAT expenses ===');
-  console.log(`Family ID: ${FAMILY_ID}`);
-  console.log(`PROD project: ${saProd.project_id}`);
-  console.log(`UAT project: ${sa.project_id}\n`);
+  console.log('\n=== Sync PROD → UAT ===');
+  console.log(`PROD: ${saProd.project_id}  UAT: ${saUat.project_id}\n`);
 
-  // Step 1: Read prod expenses (top-level collection — prod not yet migrated to family structure)
-  console.log('Step 1: Reading expenses from PROD (top-level expenses collection)...');
-  const prodSnap = await prodDb.collection('expenses').get();
-  console.log(`  Found ${prodSnap.size} expense docs in PROD.\n`);
+  // 1. Family doc
+  console.log('1️⃣  Syncing family doc...');
+  const famSnap = await prodDb.collection('families').doc(FAMILY_ID).get();
+  await uatDb.collection('families').doc(FAMILY_ID).set(famSnap.data(), { merge: true });
+  console.log('   ✓\n');
 
-  if (prodSnap.empty) {
-    console.log('No prod expenses found. Aborting.');
-    process.exit(0);
+  // 2. Expenses
+  console.log('2️⃣  Syncing expenses...');
+  const prodExpenses = await prodDb.collection('families').doc(FAMILY_ID).collection('expenses').get();
+  const uatExpensesRef = uatDb.collection('families').doc(FAMILY_ID).collection('expenses');
+  const deleted = await deleteAll(uatExpensesRef);
+  console.log(`   Deleted ${deleted} UAT expense docs`);
+  await writeAll(uatExpensesRef, prodExpenses.docs);
+  console.log(`   ✓ ${prodExpenses.size} expenses copied\n`);
+
+  // 3. Settings/config
+  console.log('3️⃣  Syncing settings/config...');
+  const configSnap = await prodDb.collection('families').doc(FAMILY_ID).collection('settings').doc('config').get();
+  if (configSnap.exists) {
+    await uatDb.collection('families').doc(FAMILY_ID).collection('settings').doc('config').set(configSnap.data(), { merge: true });
+    console.log('   ✓\n');
+  } else {
+    console.log('   No config found in prod\n');
   }
 
-  // Step 2: Delete UAT expenses
-  console.log('Step 2: Deleting existing UAT expenses...');
-  const uatExpensesRef = uatDb.collection('families').doc(FAMILY_ID).collection('expenses');
-  const deletedCount = await deleteInBatches(uatDb, uatExpensesRef, 'UAT expenses');
-  console.log(`  Done. Deleted ${deletedCount} UAT docs.\n`);
+  // 4. system_users
+  console.log('4️⃣  Syncing system_users...');
+  const prodUsers = await prodDb.collection('system_users').get();
+  for (const d of prodUsers.docs) {
+    await uatDb.collection('system_users').doc(d.id).set(d.data(), { merge: true });
+    console.log(`   ✓ ${d.data().username || d.id}`);
+  }
+  console.log();
 
-  // Step 3: Write prod expenses to UAT
-  console.log('Step 3: Copying PROD expenses into UAT...');
-  const writtenCount = await writeInBatches(uatDb, uatExpensesRef, prodSnap.docs, 'UAT expenses');
-  console.log(`  Done. Wrote ${writtenCount} docs.\n`);
-
-  console.log(`=== Complete! Deleted ${deletedCount} UAT docs, Copied ${writtenCount} PROD docs ===\n`);
+  console.log('✅  Sync complete!');
+  console.log(`   Expenses: ${prodExpenses.size}`);
+  console.log(`   Users   : ${prodUsers.size}\n`);
   process.exit(0);
-})().catch(err => {
-  console.error('FATAL ERROR:', err);
-  process.exit(1);
-});
+})().catch(err => { console.error('❌ Sync failed:', err); process.exit(1); });

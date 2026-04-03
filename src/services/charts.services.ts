@@ -1,31 +1,160 @@
 'use client';
 
-import { db } from "@/lib/firebase";
+import { db, auth } from "@/lib/firebase";
 import { collection, getDocs, doc, getDoc } from "firebase/firestore";
-import { sanitizeKey } from "@/utils/KeySanitizer";
 import dayjs from "dayjs";
 import { autoCategorize } from "@/utils/DescriptionHelper";
-// In-flight dedup only — no TTL cache (real-time)
+import { cacheRead, cacheWrite, cacheInvalidate } from "@/utils/clientCache";
+
+// ─── Dashboard Report API (single call, pre-computed server-side) ─────────────
+
+const dashboardListeners = new Set<(familyId: string) => void>();
+
+export function onDashboardUpdate(cb: (familyId: string) => void): () => void {
+  dashboardListeners.add(cb);
+  return () => dashboardListeners.delete(cb);
+}
+
+const dashboardCacheKey = (familyId: string, year: number, month: number, statusFilter: string) =>
+  `dashboard:${familyId}:${year}:${month}:${statusFilter}`;
+
+export function hasDashboardCache(familyId: string, year: number, month: number, statusFilter: string): boolean {
+  if (!familyId) return false;
+  return cacheRead(dashboardCacheKey(familyId, year, month, statusFilter), Infinity) !== null;
+}
+
+export function invalidateDashboardCache(familyId: string) {
+  cacheInvalidate(`dashboard:${familyId}`);
+}
+
+export async function getDashboardData(
+  month: number,
+  year: number,
+  familyId: string,
+  statusFilter: 'active' | 'all' = 'active'
+): Promise<any> {
+  const key = dashboardCacheKey(familyId, year, month, statusFilter);
+  const cached = cacheRead<any>(key, Infinity); // No expiry — always serve cache, always bg-check
+
+  const fetchFresh = async () => {
+    const token = await auth.currentUser?.getIdToken();
+    if (!token) throw new Error('Not authenticated');
+    const r = await fetch(
+      `/api/families/${familyId}/dashboard?year=${year}&month=${month}&statusFilter=${statusFilter}`,
+      { cache: 'no-store', headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (!r.ok) {
+      const msg = await r.json().then(j => j.error).catch(() => r.statusText);
+      throw new Error(`Dashboard API error: ${msg}`);
+    }
+    return r.json();
+  };
+
+  if (cached) {
+    // Background revalidation: check if report doc has newer data
+    fetchFresh()
+      .then(fresh => {
+        const sig = (d: any) =>
+          `${d.monthlyIncome}|${d.monthlyAmount}|${d.yearlyIncome}|${d.yearlyExpense}|${d.bankBalance}|${d.cashBalance}`;
+        if (sig(fresh) !== sig(cached)) {
+          cacheWrite(key, fresh);
+          dashboardListeners.forEach(cb => cb(familyId));
+        }
+      })
+      .catch(() => {});
+    return cached;
+  }
+
+  const fresh = await fetchFresh();
+  cacheWrite(key, fresh);
+  return fresh;
+}
 type RawDocsEntry = { docs: Array<{ id: string; data: Record<string, any> }> };
 const rawDocsInflight = new Map<string, Promise<RawDocsEntry["docs"]>>();
+const rawDocsCache = new Map<string, { docs: RawDocsEntry["docs"]; ts: number }>();
+const MEM_TTL_MS = 30_000; // 30 seconds — prevents duplicate bg fetches within same session
+const lsKey = (familyId: string) => `dex_rawdocs:${familyId}`;
 
-export function invalidateFamilyCache(_familyId: string) {
-  // No-op: caching removed, kept for call-site compatibility
+function docsSignature(docs: RawDocsEntry["docs"]): string {
+  return docs.length + ':' + docs.map(d => d.id).sort().join(',');
+}
+
+function lsRead(familyId: string): RawDocsEntry["docs"] | null {
+  try {
+    const raw = localStorage.getItem(lsKey(familyId));
+    if (!raw) return null;
+    const entry: { docs: RawDocsEntry["docs"]; ts: number } = JSON.parse(raw);
+    return entry.docs; // No TTL expiry — always serve cached, always bg-check
+  } catch { return null; }
+}
+
+function lsWrite(familyId: string, docs: RawDocsEntry["docs"]) {
+  try { localStorage.setItem(lsKey(familyId), JSON.stringify({ docs, ts: Date.now() })); } catch {}
+}
+
+// Listeners notified when background revalidation finds new data
+const dataUpdateListeners = new Set<(familyId: string) => void>();
+
+export function onDataUpdate(cb: (familyId: string) => void): () => void {
+  dataUpdateListeners.add(cb);
+  return () => dataUpdateListeners.delete(cb);
+}
+
+export function hasCachedDocs(familyId: string): boolean {
+  if (!familyId) return false;
+  if (rawDocsCache.has(familyId)) return true;
+  try { return !!localStorage.getItem(lsKey(familyId)); } catch { return false; }
+}
+
+export function invalidateFamilyCache(familyId: string) {
+  rawDocsCache.delete(familyId);
+  rawDocsInflight.delete(familyId);
+  try { localStorage.removeItem(lsKey(familyId)); } catch {}
+  // Also clear pre-computed report caches so next load fetches fresh data
+  invalidateDashboardCache(familyId);
+  invalidateBankReportCache(familyId);
 }
 
 async function getFamilyExpenseDocs(familyId: string): Promise<RawDocsEntry["docs"]> {
-  // Deduplicate concurrent calls — return the same in-flight Promise
+  // 1. In-memory hit (fastest)
+  const mem = rawDocsCache.get(familyId);
+  if (mem && Date.now() - mem.ts < MEM_TTL_MS) return mem.docs;
+
+  // 2. localStorage hit → return immediately, revalidate in background
+  const lsDocs = lsRead(familyId);
+  if (lsDocs) {
+    rawDocsCache.set(familyId, { docs: lsDocs, ts: Date.now() });
+
+    // Background revalidation (deduplicated)
+    if (!rawDocsInflight.has(familyId)) {
+      const cachedSig = docsSignature(lsDocs);
+      const bgPromise = getDocs(collection(db, "families", familyId, "expenses")).then(snap => {
+        const freshDocs = snap.docs.map(d => ({ id: d.id, data: d.data() as Record<string, any> }));
+        rawDocsInflight.delete(familyId);
+        if (docsSignature(freshDocs) !== cachedSig) {
+          rawDocsCache.set(familyId, { docs: freshDocs, ts: Date.now() });
+          lsWrite(familyId, freshDocs);
+          dataUpdateListeners.forEach(cb => cb(familyId));
+        }
+        return freshDocs;
+      }).catch(err => { rawDocsInflight.delete(familyId); throw err; });
+      rawDocsInflight.set(familyId, bgPromise);
+    }
+
+    return lsDocs;
+  }
+
+  // 3. No cache — fresh fetch (first load)
   const inflight = rawDocsInflight.get(familyId);
   if (inflight) return inflight;
 
   const promise = getDocs(collection(db, "families", familyId, "expenses")).then(snap => {
     const docs = snap.docs.map(d => ({ id: d.id, data: d.data() as Record<string, any> }));
+    rawDocsCache.set(familyId, { docs, ts: Date.now() });
+    lsWrite(familyId, docs);
     rawDocsInflight.delete(familyId);
     return docs;
-  }).catch(err => {
-    rawDocsInflight.delete(familyId);
-    throw err;
-  });
+  }).catch(err => { rawDocsInflight.delete(familyId); throw err; });
 
   rawDocsInflight.set(familyId, promise);
   return promise;
@@ -225,46 +354,11 @@ export async function getClearPortStats(month?: number, year?: number, options?:
 }
 
 export async function getClearanceTimelineData(year?: number, familyId?: string) {
+  if (!familyId) return { income: [], expense: [] };
   try {
-    if (!familyId) throw new Error("No familyId set for timeline");
-    const rawDocs = await getFamilyExpenseDocs(familyId);
-    const targetYear = year || dayjs().year();
-    const incomeMonthly: Record<string, number> = {};
-    const expenseMonthly: Record<string, number> = {};
-
-    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    months.forEach(m => { incomeMonthly[m] = 0; expenseMonthly[m] = 0; });
-
-    const now = dayjs();
-    rawDocs.forEach(({ data }) => {
-      if (data.status === 'inactive') return;
-
-      const dateStr = data[sanitizeKey("Date")] || data["Date"];
-      if (dateStr) {
-        const date = dayjs(dateStr);
-        if (date.isAfter(now, 'day')) return;
-
-        if (date.year() === targetYear) {
-          const month = months[date.month()];
-          let rawAmount = data[sanitizeKey("Amount")] || data["Amount"] || "0";
-          if (typeof rawAmount === "string") {
-            rawAmount = rawAmount.replace(/,/g, ".");
-          }
-          const amount = Math.abs(parseFloat(rawAmount));
-          if (isNaN(amount) || amount === 0) return;
-
-          if (data["Type"] === "Income" || data["type"] === "Income") incomeMonthly[month] += amount;
-          else expenseMonthly[month] += amount;
-        }
-      }
-    });
-
-    const result = {
-      income: months.map(m => ({ x: m, y: parseFloat(incomeMonthly[m].toFixed(2)) })),
-      expense: months.map(m => ({ x: m, y: parseFloat(expenseMonthly[m].toFixed(2)) }))
-    };
-
-    return result;
+    // Use the pre-computed dashboard report (current month of that year to get the full timeline)
+    const data = await getDashboardData(dayjs().month(), year || dayjs().year(), familyId);
+    return data.timeline || { income: [], expense: [] };
   } catch (error) {
     console.error("Error fetching timeline data:", error);
     return { income: [], expense: [] };
@@ -272,47 +366,12 @@ export async function getClearanceTimelineData(year?: number, familyId?: string)
 }
 
 export async function getWeeksProfitData(month?: number, year?: number, familyId?: string) {
+  if (!familyId) return { sales: [], revenue: [] };
   try {
-    if (!familyId) throw new Error("No familyId set for weeks profit");
-    const rawDocs = await getFamilyExpenseDocs(familyId);
-    const now = dayjs();
-    const targetMonth = month !== undefined ? month : now.month();
-    const targetYear = year !== undefined ? year : now.year();
-    const categoryTotals: Record<string, number> = {};
-
-    rawDocs.forEach(({ data }) => {
-      if (data.status === 'inactive') return;
-
-      const dateStr = data[sanitizeKey("Date")] || data["Date"];
-      if (!dateStr) return;
-
-      const date = dayjs(dateStr);
-      if (date.isAfter(now, 'day')) return;
-
-      if (date.month() === targetMonth && date.year() === targetYear) {
-        if (data.Type !== "Income" && data.type !== "Income") {
-          const category = autoCategorize(data.Description || data.description || "", data.Category || data.category);
-          let rawAmount = data.Amount || data.amount || 0;
-          if (typeof rawAmount === "string") {
-            rawAmount = rawAmount.replace(/,/g, ".");
-          }
-          const amount = Math.abs(parseFloat(rawAmount));
-          if (isNaN(amount) || amount === 0) return;
-          categoryTotals[category] = (categoryTotals[category] || 0) + amount;
-        }
-      }
-    });
-
-    const topCategories = Object.entries(categoryTotals)
-      .sort(([, a], [, b]) => b - a)
-      .slice(0, 10);
-
-    const result = {
-      sales: topCategories.map(([name, value]) => ({ x: name, y: parseFloat(value.toFixed(2)) })),
-      revenue: topCategories.map(() => ({ x: "", y: 0 })),
-    };
-
-    return result;
+    const m = month !== undefined ? month : dayjs().month();
+    const y = year || dayjs().year();
+    const data = await getDashboardData(m, y, familyId);
+    return data.categories || { sales: [], revenue: [] };
   } catch (error) {
     console.error("Error fetching category data:", error);
     return { sales: [], revenue: [] };
@@ -323,7 +382,67 @@ export async function getPaymentsOverviewData(year?: number, familyId?: string) 
   return getClearanceTimelineData(year, familyId);
 }
 
-export async function getDevicesUsedData(timeFrame?: string) {
+// ─── Bank Report API ──────────────────────────────────────────────────────────
+
+const bankReportCacheKey = (familyId: string, bankId: string, year: number, month: number) =>
+  `bankreport:${familyId}:${bankId}:${year}:${month}`;
+
+export function hasBankReportCache(familyId: string, bankId: string, year: number, month: number): boolean {
+  if (!familyId) return false;
+  return cacheRead(bankReportCacheKey(familyId, bankId, year, month), Infinity) !== null;
+}
+
+export function invalidateBankReportCache(familyId: string) {
+  cacheInvalidate(`bankreport:${familyId}`);
+}
+
+const bankReportListeners = new Set<(familyId: string) => void>();
+
+export function onBankReportUpdate(cb: (familyId: string) => void): () => void {
+  bankReportListeners.add(cb);
+  return () => bankReportListeners.delete(cb);
+}
+
+export async function getBankReportData(
+  familyId: string,
+  bankId: string,
+  year: number,
+  month: number
+): Promise<{ transactions: any[]; startingBalance: number }> {
+  const key = bankReportCacheKey(familyId, bankId, year, month);
+  const cached = cacheRead<any>(key, Infinity);
+
+  const fetchFresh = async () => {
+    const token = await auth.currentUser?.getIdToken();
+    if (!token) throw new Error('Not authenticated');
+    const r = await fetch(
+      `/api/families/${familyId}/bank-report/${bankId}?year=${year}&month=${month}`,
+      { cache: 'no-store', headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (!r.ok) {
+      const msg = await r.json().then(j => j.error).catch(() => r.statusText);
+      throw new Error(`Bank report API error: ${msg}`);
+    }
+    return r.json();
+  };
+
+  if (cached) {
+    fetchFresh().then(fresh => {
+      const sig = (d: any) => d.transactions?.length + ':' + (d.startingBalance || 0);
+      if (sig(fresh) !== sig(cached)) {
+        cacheWrite(key, fresh);
+        bankReportListeners.forEach(cb => cb(familyId));
+      }
+    }).catch(() => {});
+    return cached;
+  }
+
+  const fresh = await fetchFresh();
+  cacheWrite(key, fresh);
+  return fresh;
+}
+
+export async function getDevicesUsedData(_timeFrame?: string) {
   return [
     { name: "Desktop", percentage: 0.65, amount: 1625 },
     { name: "Tablet", percentage: 0.1, amount: 250 },

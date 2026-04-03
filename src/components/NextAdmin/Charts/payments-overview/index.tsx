@@ -15,27 +15,31 @@ const Chart = dynamic(() => import("react-apexcharts"), { ssr: false });
 type PropsType = {
   year?: number;
   className?: string;
+  preloadedData?: { income: any[]; expense: any[] };
 };
 
-export function PaymentsOverview({ year: propYear, className }: PropsType) {
-  const [data, setData] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+export function PaymentsOverview({ year: propYear, className, preloadedData }: PropsType) {
+  const [data, setData] = useState<any>(preloadedData || null);
+  const [loading, setLoading] = useState(!preloadedData);
   const { resolvedTheme } = useTheme();
   const isMobile = useIsMobile();
   const isDark = resolvedTheme === "dark";
   const { currentFamilyId } = useAuthContext();
 
-  // Use the year passed via props, or default to current year
   const year = propYear || new Date().getFullYear();
 
+  // Sync when parent passes updated preloaded data (background revalidation)
   useEffect(() => {
+    if (preloadedData) { setData(preloadedData); setLoading(false); }
+  }, [preloadedData]);
+
+  // Only fetch independently if no preloaded data provided (e.g. standalone usage)
+  useEffect(() => {
+    if (preloadedData) return;
     async function loadData() {
       setLoading(true);
       try {
-        if (!currentFamilyId) {
-          setData({ income: [], expense: [] });
-          return;
-        }
+        if (!currentFamilyId) { setData({ income: [], expense: [] }); return; }
         const result = await getPaymentsOverviewData(year, currentFamilyId);
         setData(result);
       } catch (error) {
@@ -45,7 +49,7 @@ export function PaymentsOverview({ year: propYear, className }: PropsType) {
       }
     }
     loadData();
-  }, [year, currentFamilyId]);
+  }, [year, currentFamilyId, preloadedData]);
 
   const options: ApexOptions = {
     colors: ["#10B981", "#EF4444"], // Emerald (Income) & Rose (Expense)
