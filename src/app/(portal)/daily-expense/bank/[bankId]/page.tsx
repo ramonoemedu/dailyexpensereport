@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import ExpenseDataFormPage from "@/components/ExpenseDataForm/ExpenseDataFormPage";
 import ExpenseDetail from "@/components/ExpenseDataForm/ExpenseDetail";
 import dayjs from "dayjs";
@@ -71,6 +71,7 @@ export default function DailyExpenseBankPage() {
   const [editIndex, setEditIndex] = useState<number | null>(null);
   const [page, setPage] = useState(1);
   const [searchText, setSearchText] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [date, setDate] = useState<string | null>(null);
   const [typeFilter, setTypeFilter] = useState<string>("All");
   const [month, setMonth] = useState(new Date().getMonth());
@@ -97,13 +98,33 @@ export default function DailyExpenseBankPage() {
     handleDetailClose();
   };
 
+  // Debounce search input — avoids an API call on every keystroke
   useEffect(() => {
-    setPage(1);
-  }, [searchText, date, typeFilter, month, year, statusFilter]);
+    const timer = setTimeout(() => setDebouncedSearch(searchText), 300);
+    return () => clearTimeout(timer);
+  }, [searchText]);
 
+  // Single effect handles page reset + fetch to avoid the double-fetch that occurred
+  // when the old pair of effects (setPage + fetchRows) fired sequentially.
+  const prevFiltersRef = useRef({ debouncedSearch, date, typeFilter, month, year, statusFilter });
   useEffect(() => {
-    fetchRows(page, { searchText, date, typeFilter, month, year, statusFilter });
-  }, [page, fetchRows, searchText, date, typeFilter, month, year, statusFilter]);
+    const prev = prevFiltersRef.current;
+    const filtersChanged =
+      prev.debouncedSearch !== debouncedSearch || prev.date !== date ||
+      prev.typeFilter !== typeFilter || prev.month !== month ||
+      prev.year !== year || prev.statusFilter !== statusFilter;
+    prevFiltersRef.current = { debouncedSearch, date, typeFilter, month, year, statusFilter };
+
+    if (filtersChanged) {
+      setPage(1);
+      if (page === 1) {
+        fetchRows(1, { searchText: debouncedSearch, date, typeFilter, month, year, statusFilter });
+      }
+      // If page > 1, setPage(1) triggers a re-run with filtersChanged=false and page=1
+    } else {
+      fetchRows(page, { searchText: debouncedSearch, date, typeFilter, month, year, statusFilter });
+    }
+  }, [page, fetchRows, debouncedSearch, date, typeFilter, month, year, statusFilter]);
 
   const openAddDialog = () => {
     setForm(initialForm);
@@ -395,6 +416,7 @@ export default function DailyExpenseBankPage() {
             <button
               onClick={() => {
                 setSearchText("");
+                setDebouncedSearch("");
                 setDate(null);
                 setTypeFilter("All");
                 setMonth(new Date().getMonth());

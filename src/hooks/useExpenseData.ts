@@ -16,6 +16,7 @@ import {
 import { PAGE_SIZE, sanitizeKey, unsanitizeKey } from "@/utils/KeySanitizer";
 import { sendTelegramNotification, formatExpenseMessage } from "@/utils/telegramService";
 import { invalidateFamilyCache } from "@/services/charts.services";
+import { cacheRead, cacheWrite } from "@/utils/clientCache";
 
 // Module-level cache for dropdown/settings so Firestore isn't re-read on every mount
 type SettingsCacheEntry = {
@@ -415,37 +416,65 @@ export function useExpenseData(options?: {
       if (!useServerPagination) return;
       if (authLoading || !familyId) return;
 
-      setLoading(true);
-      try {
-        const headers = await getAuthHeaders();
-        const params = new URLSearchParams({
-          page: String(pageNumber),
-          pageSize: String(PAGE_SIZE),
-          month: String(effectiveFilters.month),
-          year: String(effectiveFilters.year),
-          date: effectiveFilters.date || "",
-          searchText: effectiveFilters.searchText || "",
-          typeFilter: effectiveFilters.typeFilter || "All",
-          statusFilter: (effectiveFilters.statusFilter || optionStatusParam) as string,
-          paymentMethods: paymentMethodsParam,
-          balanceType: balanceTypeParam,
-          bankId: bankIdParam,
-        });
+      const headers = await getAuthHeaders();
+      const params = new URLSearchParams({
+        page: String(pageNumber),
+        pageSize: String(PAGE_SIZE),
+        month: String(effectiveFilters.month),
+        year: String(effectiveFilters.year),
+        date: effectiveFilters.date || "",
+        searchText: effectiveFilters.searchText || "",
+        typeFilter: effectiveFilters.typeFilter || "All",
+        statusFilter: (effectiveFilters.statusFilter || optionStatusParam) as string,
+        paymentMethods: paymentMethodsParam,
+        balanceType: balanceTypeParam,
+        bankId: bankIdParam,
+      });
 
-        const cacheKey = `/api/families/${familyId}/expenses?${params.toString()}`;
-        const res = await fetch(cacheKey, { method: "GET", headers });
-        const payload = await res.json();
-        if (!res.ok) throw new Error(payload?.error || "Failed to fetch expenses.");
+      const lsCacheKey = `expenses:${familyId}:${params.toString()}`;
+      const cached = cacheRead<any>(lsCacheKey, Infinity);
 
+      const applyPayload = (payload: any) => {
         setServerRows(Array.isArray(payload?.rows) ? payload.rows : []);
         setServerTotalRows(Number(payload?.totalRows || 0));
         setServerStats((prev: any) => payload?.stats || prev);
         setServerFilteredStats((prev: any) => payload?.filteredStats || prev);
         setServerUniqueDescriptions(Array.isArray(payload?.uniqueDescriptions) ? payload.uniqueDescriptions : []);
-      } catch (err) {
-        console.error("Error fetching paginated rows:", err);
-      } finally {
+      };
+
+      // Serve from cache immediately (no spinner)
+      if (cached) {
+        applyPayload(cached);
         setLoading(false);
+      } else {
+        setLoading(true);
+      }
+
+      // Always fetch fresh from server (background if cached, blocking if not)
+      const doFetch = async () => {
+        try {
+          const res = await fetch(`/api/families/${familyId}/expenses?${params.toString()}`, { method: "GET", headers });
+          const payload = await res.json();
+          if (!res.ok) throw new Error(payload?.error || "Failed to fetch expenses.");
+
+          // Only update state and cache if data changed
+          const newSig = JSON.stringify({ rows: payload.rows, totalRows: payload.totalRows });
+          const oldSig = cached ? JSON.stringify({ rows: cached.rows, totalRows: cached.totalRows }) : null;
+          if (newSig !== oldSig) {
+            cacheWrite(lsCacheKey, payload);
+            applyPayload(payload);
+          }
+        } catch (err) {
+          console.error("Error fetching paginated rows:", err);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      if (cached) {
+        doFetch(); // fire-and-forget background refresh
+      } else {
+        await doFetch();
       }
     },
     [

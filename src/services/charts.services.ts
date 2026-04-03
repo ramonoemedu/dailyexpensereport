@@ -113,6 +113,8 @@ export function invalidateFamilyCache(familyId: string) {
   // Also clear pre-computed report caches so next load fetches fresh data
   invalidateDashboardCache(familyId);
   invalidateBankReportCache(familyId);
+  // Clear server-paginated expense list cache
+  cacheInvalidate(`expenses:${familyId}`);
 }
 
 async function getFamilyExpenseDocs(familyId: string): Promise<RawDocsEntry["docs"]> {
