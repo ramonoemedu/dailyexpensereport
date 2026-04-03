@@ -115,8 +115,45 @@ export async function GET(req: NextRequest) {
       )
     );
 
+    const mapUserDoc = (doc: FirebaseFirestore.DocumentSnapshot) => {
+      const data = doc.data() as Partial<SystemUserDoc>;
+      const resolvedUid = data.uid || doc.id;
+      const loginEmail = data.loginEmail || data.email || "";
+      const username =
+        data.username ||
+        (loginEmail.includes("@") ? loginEmail.split("@")[0] : "") ||
+        resolvedUid.slice(0, 8);
+      const fullName = data.fullName || username;
+      return {
+        id: doc.id,
+        uid: resolvedUid,
+        fullName,
+        username,
+        loginEmail,
+        userId: data.userId || `USR-${resolvedUid.slice(0, 4).toUpperCase()}`,
+        status: (data.status || "active") as "active" | "inactive",
+        email: data.email || loginEmail,
+      };
+    };
+
+    // If members subcollection is empty, fall back to querying system_users by family membership
     if (memberUids.length === 0) {
-      return NextResponse.json({ users: [] });
+      const byFamily = await getAdminDb()
+        .collection("system_users")
+        .where(`families.${primaryFamilyId}`, "in", ["admin", "member", "viewer"])
+        .get();
+
+      if (byFamily.empty) {
+        return NextResponse.json({ users: [] });
+      }
+
+      const users = byFamily.docs
+        .filter((doc) => doc.exists)
+        .map(mapUserDoc)
+        .filter((user, index, arr) => arr.findIndex((u) => u.uid === user.uid) === index)
+        .sort((a, b) => a.username.localeCompare(b.username));
+
+      return NextResponse.json({ users });
     }
 
     const userDocs = await Promise.all(
@@ -137,27 +174,7 @@ export async function GET(req: NextRequest) {
 
     const users = userDocs
       .filter((doc) => !!doc && doc.exists)
-      .map((doc) => {
-        const data = doc!.data() as Partial<SystemUserDoc>;
-        const resolvedUid = data.uid || doc!.id;
-        const loginEmail = data.loginEmail || data.email || "";
-        const username =
-          data.username ||
-          (loginEmail.includes("@") ? loginEmail.split("@")[0] : "") ||
-          resolvedUid.slice(0, 8);
-        const fullName = data.fullName || username;
-
-        return {
-          id: doc!.id,
-          uid: resolvedUid,
-          fullName,
-          username,
-          loginEmail,
-          userId: data.userId || `USR-${resolvedUid.slice(0, 4).toUpperCase()}`,
-          status: (data.status || "active") as "active" | "inactive",
-          email: data.email || loginEmail,
-        };
-      })
+      .map((doc) => mapUserDoc(doc!))
       .filter((user, index, arr) => arr.findIndex((u) => u.uid === user.uid) === index)
       .sort((a, b) => a.username.localeCompare(b.username));
 
