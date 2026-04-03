@@ -45,7 +45,7 @@ import { useAuthContext } from "@/components/AuthProvider";
 import { useToast } from "@/components/NextAdmin/ui/toast";
 import { cachedFetch, cacheInvalidate } from "@/utils/clientCache";
 
-const USERS_CACHE_TTL = 30 * 60_000;
+const USERS_CACHE_TTL = 2 * 60_000; // 2 minutes
 
 interface SystemUser {
   id: string;
