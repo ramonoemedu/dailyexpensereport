@@ -27,12 +27,139 @@ export function refineDescription(text: string): string {
   };
 
   Object.entries(commonCorrections).forEach(([typo, correct]) => {
-    const regex = new RegExp(`\b${typo}\b`, 'gi');
+    const regex = new RegExp(`\\b${typo}\\b`, 'gi');
     refined = refined.replace(regex, correct);
   });
 
   return refined;
 }
+
+function normalizeText(text: string): string {
+  return text
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
+function levenshteinDistance(source: string, target: string): number {
+  if (source === target) return 0;
+  if (!source.length) return target.length;
+  if (!target.length) return source.length;
+
+  const previousRow = Array.from({ length: target.length + 1 }, (_, index) => index);
+
+  for (let i = 1; i <= source.length; i += 1) {
+    const currentRow = [i];
+    for (let j = 1; j <= target.length; j += 1) {
+      const insertion = currentRow[j - 1] + 1;
+      const deletion = previousRow[j] + 1;
+      const substitution = previousRow[j - 1] + (source[i - 1] === target[j - 1] ? 0 : 1);
+      currentRow.push(Math.min(insertion, deletion, substitution));
+    }
+    for (let j = 0; j < previousRow.length; j += 1) {
+      previousRow[j] = currentRow[j];
+    }
+  }
+
+  return previousRow[target.length];
+}
+
+function isApproximateTokenMatch(source: string, target: string): boolean {
+  if (!source || !target) return false;
+  if (source.includes(target) || target.includes(source)) return true;
+
+  const maxDistance = target.length <= 4 ? 1 : 2;
+  return levenshteinDistance(source, target) <= maxDistance;
+}
+
+function matchesKeyword(description: string, keyword: string): boolean {
+  const normalizedDescription = normalizeText(description);
+  const normalizedKeyword = normalizeText(keyword);
+  if (!normalizedDescription || !normalizedKeyword) return false;
+
+  if (normalizedDescription.includes(normalizedKeyword)) return true;
+
+  const descriptionCompact = normalizedDescription.replace(/\s+/g, '');
+  const keywordCompact = normalizedKeyword.replace(/\s+/g, '');
+  if (descriptionCompact.includes(keywordCompact)) return true;
+
+  const descriptionTokens = normalizedDescription.split(' ');
+  const keywordTokens = normalizedKeyword.split(' ');
+
+  return keywordTokens.every((keywordToken) =>
+    descriptionTokens.some((descriptionToken) => isApproximateTokenMatch(descriptionToken, keywordToken))
+  );
+}
+
+const CATEGORY_RULES: Array<{ category: string; keywords: string[] }> = [
+  {
+    category: 'Food & Drinks',
+    keywords: [
+      'café', 'coffee', 'cofee', 'cafe', 'lunch', 'dinner', 'food', 'restaurant', 'drink', 'matcha',
+      'coconut', 'bread', 'water', 'wter', 'ice cream', 'burger', 'pizza', 'kfc', 'meat', 'vegetable',
+      'fruit', 'bakery', 'noodle', 'starbuck', 'starbucks', 'soup', 'oyster', 'coke', 'coca', 'beer',
+      'wisky', 'swicky', 'wine', 'meal', 'snack', 'tea', 'juice'
+    ],
+  },
+  {
+    category: 'Transportation',
+    keywords: [
+      'gasoline', 'fuel', 'taxi', 'grab', 'car', 'hometown', 'tuktuk', 'passapp', 'parking', 'moto',
+      'bus', 'trip', 'caltex', 'totalenerg', 'tela', 'ptt', 'ride', 'transport'
+    ],
+  },
+  {
+    category: 'Utilities',
+    keywords: [
+      'electricity', 'edc', 'water bill', 'water', 'internet', 'phone', 'top up', 'mobile data',
+      'cellcard', 'smart', 'metfone', 'refill', 'wifi', 'utility', 'bill'
+    ],
+  },
+  {
+    category: 'Health',
+    keywords: [
+      'health', 'hospital', 'doctor', 'medichine', 'medicine', 'pharmacy', 'dentist', 'teeth', 'sick',
+      'clinic', 'vitamin', 'supplement', 'medical'
+    ],
+  },
+  {
+    category: 'Family',
+    keywords: [
+      'mak', 'pa', 'pha', 'hea', 'jee', 'send to', 'family', 'help family', 'support', 'parent', 'wife',
+      'husband', 'child', 'baby', 'diaper', 'milk powder', 'famly', 'family help', 'family support'
+    ],
+  },
+  {
+    category: 'Shopping',
+    keywords: [
+      'clothes', 'shoes', 'electronic', 'iphone', 'gadget', 'mall', 'shopping', 'dress', 'skirt', 'shirt',
+      'watch', 'lipstick', 'makeup', 'make up', 'skincare', 'shampoo', 'soap', 'nail', 'cream', 'aeon',
+      'lucky express', 'mart', 'store', 'purchase'
+    ],
+  },
+  {
+    category: 'Entertainment',
+    keywords: [
+      'movie', 'cinema', 'game', 'netflix', 'concert', 'party', 'holiday', 'vacation', 'hotel', 'resort',
+      'fun', 'entertainment'
+    ],
+  },
+  {
+    category: 'Education',
+    keywords: ['school', 'university', 'course', 'book', 'training', 'tuition', 'study', 'class'],
+  },
+  {
+    category: 'Investment',
+    keywords: ['invest', 'stock', 'crypto', 'property', 'gold', 'saving', 'savings'],
+  },
+  {
+    category: 'Gift & Donation',
+    keywords: ['gift', 'donation', 'present', 'wedding', 'charity', 'tip', 'contribution'],
+  },
+];
 
 /**
  * Filters the unique descriptions intelligently
@@ -63,95 +190,12 @@ export function autoCategorize(description: string, currentCategory?: string): s
   if (currentCategory && !genericCategories.includes(currentCategory)) {
     return currentCategory;
   }
-  
-  const desc = description.toLowerCase();
-  
-  // Food & Drinks
-  if (
-    desc.includes("café") || desc.includes("coffee") || desc.includes("lunch") || 
-    desc.includes("dinner") || desc.includes("food") || desc.includes("restaurant") || 
-    desc.includes("drink") || desc.includes("matcha") || desc.includes("coconut") ||
-    desc.includes("bread") || desc.includes("water") || desc.includes("ice cream") ||
-    desc.includes("burger") || desc.includes("pizza") || desc.includes("kfc") ||
-    desc.includes("meat") || desc.includes("vegetable") || desc.includes("fruit") ||
-    desc.includes("bakery") || desc.includes("noodle") || desc.includes("starbuck") ||
-    desc.includes("soup") || desc.includes("oyster") || desc.includes("coke") ||
-    desc.includes("coca") || desc.includes("beer") || desc.includes("wisky") ||
-    desc.includes("swicky") || desc.includes("wine")
-  ) return "Food & Drinks";
 
-  // Transportation
-  if (
-    desc.includes("gasoline") || desc.includes("fuel") || desc.includes("taxi") || 
-    desc.includes("grab") || desc.includes("car") || desc.includes("hometown") || 
-    desc.includes("tuktuk") || desc.includes("passapp") || desc.includes("parking") ||
-    desc.includes("moto") || desc.includes("bus") || desc.includes("trip") ||
-    desc.includes("caltex") || desc.includes("totalenerg") || desc.includes("tela") ||
-    desc.includes("ptt")
-  ) return "Transportation";
+  for (const rule of CATEGORY_RULES) {
+    if (rule.keywords.some((keyword) => matchesKeyword(description, keyword))) {
+      return rule.category;
+    }
+  }
 
-  // Utilities
-  if (
-    desc.includes("electricity") || desc.includes("edc") || desc.includes("water bill") || 
-    desc.includes("internet") || desc.includes("phone") || desc.includes("top up") || 
-    desc.includes("mobile data") || desc.includes("cellcard") || desc.includes("smart") ||
-    desc.includes("metfone") || desc.includes("refill") || desc.includes("wifi")
-  ) return "Utilities";
-
-  // Health
-  if (
-    desc.includes("health") || desc.includes("hospital") || desc.includes("doctor") || 
-    desc.includes("medichine") || desc.includes("medicine") || desc.includes("pharmacy") ||
-    desc.includes("dentist") || desc.includes("teeth") || desc.includes("sick") ||
-    desc.includes("clinic") || desc.includes("vitamin") || desc.includes("supplement")
-  ) return "Health";
-
-  // Family
-  if (
-    desc.includes("mak") || desc.includes("pa") || desc.includes("pha") || 
-    desc.includes("hea") || desc.includes("jee") || desc.includes("send to") || 
-    desc.includes("family") || desc.includes("support") || desc.includes("parent") ||
-    desc.includes("wife") || desc.includes("husband") || desc.includes("child") ||
-    desc.includes("baby") || desc.includes("diaper") || desc.includes("milk powder")
-  ) return "Family";
-
-  // Shopping
-  if (
-    desc.includes("clothes") || desc.includes("shoes") || desc.includes("electronic") ||
-    desc.includes("iphone") || desc.includes("gadget") || desc.includes("mall") ||
-    desc.includes("shopping") || desc.includes("dress") || desc.includes("skirt") ||
-    desc.includes("shirt") || desc.includes("watch") || desc.includes("lipstick") ||
-    desc.includes("makeup") || desc.includes("make up") || desc.includes("skincare") ||
-    desc.includes("shampoo") || desc.includes("soap") || desc.includes("nail") ||
-    desc.includes("cream") || desc.includes("aeon") || desc.includes("lucky express") ||
-    desc.includes("mart")
-  ) return "Shopping";
-
-  // Entertainment
-  if (
-    desc.includes("movie") || desc.includes("cinema") || desc.includes("game") || 
-    desc.includes("netflix") || desc.includes("concert") || desc.includes("party") ||
-    desc.includes("holiday") || desc.includes("vacation") || desc.includes("hotel") ||
-    desc.includes("resort")
-  ) return "Entertainment";
-
-  // Education
-  if (
-    desc.includes("school") || desc.includes("university") || desc.includes("course") || 
-    desc.includes("book") || desc.includes("training") || desc.includes("tuition")
-  ) return "Education";
-
-  // Investment
-  if (
-    desc.includes("invest") || desc.includes("stock") || desc.includes("crypto") || 
-    desc.includes("property") || desc.includes("gold") || desc.includes("saving")
-  ) return "Investment";
-
-  // Gift & Donation
-  if (
-    desc.includes("gift") || desc.includes("donation") || desc.includes("present") || 
-    desc.includes("wedding") || desc.includes("charity") || desc.includes("tip")
-  ) return "Gift & Donation";
-  
   return "Other";
 }

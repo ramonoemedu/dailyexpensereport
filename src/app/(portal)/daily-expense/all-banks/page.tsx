@@ -234,7 +234,7 @@ export default function DailyExpenseAllBanksPage() {
   const handleChange = (col: string, value: string) => {
     // If user enters a negative sign for expense, we can keep it or normalize it
     // But the UI will handle display based on Type
-    setForm({ ...form, [col]: value });
+    setForm((prev) => ({ ...prev, [col]: value }));
   };
 
   return (

@@ -93,11 +93,24 @@ const ExpenseDataFormPage: React.FC<Props> = ({
   bankName = "Bank",
 }) => {
   const descriptionRef = React.useRef<HTMLInputElement>(null);
+  const isSelectingSuggestionRef = React.useRef(false);
   const [showSuggestions, setShowSuggestions] = React.useState(false);
   const [suggestions, setSuggestions] = React.useState<string[]>([]);
   const [exchangeRate, setExchangeRate] = React.useState<number>(4100);
   const [khrAmount, setKhrAmount] = React.useState<string>("");
   const [selectedIds, setSelectedIds] = React.useState<string[]>([]);
+  const [categoryManuallyEdited, setCategoryManuallyEdited] = React.useState(false);
+
+  const syncCategoryFromDescription = (text: string) => {
+    if (categoryManuallyEdited) {
+      return;
+    }
+
+    const nextCategory = autoCategorize(text, "");
+    if (nextCategory !== form["Category"]) {
+      handleChange("Category", nextCategory);
+    }
+  };
 
   // Calculate totals for selection
   const selectedTotal = React.useMemo(() => {
@@ -153,14 +166,15 @@ const ExpenseDataFormPage: React.FC<Props> = ({
     }
   }, [dialogOpen, editIndex, saving, form["Description"]]);
 
+  React.useEffect(() => {
+    if (dialogOpen && !saving && !form["Description"] && editIndex === null) {
+      setCategoryManuallyEdited(false);
+    }
+  }, [dialogOpen, editIndex, saving, form["Description"]]);
+
   const handleDescChange = (val: string) => {
     handleChange("Description", val);
-
-    // Auto Categorize
-    const category = autoCategorize(val, form["Category"]);
-    if (category !== form["Category"]) {
-      handleChange("Category", category);
-    }
+    syncCategoryFromDescription(val);
 
     if (val.length > 0) {
       const filtered = getSmartSuggestions(val, uniqueDescriptions);
@@ -174,10 +188,15 @@ const ExpenseDataFormPage: React.FC<Props> = ({
   const handleDescBlur = () => {
     // Delay to allow suggestion click
     setTimeout(() => {
+      if (isSelectingSuggestionRef.current) {
+        return;
+      }
+
       setShowSuggestions(false);
       const refined = refineDescription(form["Description"] || "");
       if (refined !== form["Description"]) {
         handleChange("Description", refined);
+        syncCategoryFromDescription(refined);
       }
     }, 200);
   };
@@ -377,8 +396,13 @@ const ExpenseDataFormPage: React.FC<Props> = ({
                         <FormField label={label} className={isDescription ? "relative" : ""}>
                           {options ? (
                             <select
-                              value={form[valueKey] || "Expense"}
-                              onChange={(e) => handleChange(valueKey, e.target.value)}
+                              value={form[valueKey] || (isCategory ? "" : "Expense")}
+                              onChange={(e) => {
+                                if (isCategory) {
+                                  setCategoryManuallyEdited(e.target.value !== "" && e.target.value !== "Other");
+                                }
+                                handleChange(valueKey, e.target.value);
+                              }}
                               className="w-full rounded-xl border border-stroke bg-gray-2 px-4 py-2.5 text-sm text-dark outline-none transition-all focus:border-primary focus:ring-4 focus:ring-primary/10 dark:border-dark-3 dark:bg-dark-2 dark:text-white dark:focus:border-primary"
                             >
                               <option value="">Select {col}</option>
@@ -410,9 +434,19 @@ const ExpenseDataFormPage: React.FC<Props> = ({
                                       key={i}
                                       type="button"
                                       className="w-full px-4 py-2 text-left text-sm text-dark hover:bg-primary/5 hover:text-primary dark:text-white"
+                                      onMouseDown={(e) => {
+                                        e.preventDefault();
+                                        isSelectingSuggestionRef.current = true;
+                                      }}
                                       onClick={() => {
-                                        handleChange("Description", s);
+                                        const refined = refineDescription(s);
+                                        handleChange("Description", refined);
+                                        syncCategoryFromDescription(refined);
                                         setShowSuggestions(false);
+                                        setSuggestions([]);
+                                        window.setTimeout(() => {
+                                          isSelectingSuggestionRef.current = false;
+                                        }, 250);
                                       }}
                                     >
                                       {s}

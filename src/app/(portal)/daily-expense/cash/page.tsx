@@ -225,7 +225,7 @@ export default function DailyExpenseCashPage() {
   const handleChange = (col: string, value: string) => {
     // If user enters a negative sign for expense, we can keep it or normalize it
     // But the UI will handle display based on Type
-    setForm({ ...form, [col]: value });
+    setForm((prev) => ({ ...prev, [col]: value }));
   };
 
   return (
@@ -312,18 +312,18 @@ export default function DailyExpenseCashPage() {
           <div className="grid gap-4 sm:grid-cols-2 animate-fade-in">
             <OverviewCard
               label={`Total Debit (${dayjs(date).format('DD MMM')})`}
-              data={{ 
-                value: `$${filteredStats.totalDebit.toLocaleString(undefined, { minimumFractionDigits: 2 })} / ៛${filteredStats.totalDebitKHR.toLocaleString(undefined, { minimumFractionDigits: 0 })}`, 
-                growthRate: 0 
+              data={{
+                value: `$${filteredStats.totalDebit.toLocaleString(undefined, { minimumFractionDigits: 2 })} / ៛${filteredStats.totalDebitKHR.toLocaleString(undefined, { minimumFractionDigits: 0 })}`,
+                growthRate: 0
               }}
               Icon={IncomeIcon}
               gradient="green"
             />
             <OverviewCard
               label={`Total Credit (${dayjs(date).format('DD MMM')})`}
-              data={{ 
-                value: `$${filteredStats.totalCredit.toLocaleString(undefined, { minimumFractionDigits: 2 })} / ៛${filteredStats.totalCreditKHR.toLocaleString(undefined, { minimumFractionDigits: 0 })}`, 
-                growthRate: 0 
+              data={{
+                value: `$${filteredStats.totalCredit.toLocaleString(undefined, { minimumFractionDigits: 2 })} / ៛${filteredStats.totalCreditKHR.toLocaleString(undefined, { minimumFractionDigits: 0 })}`,
+                growthRate: 0
               }}
               Icon={ExpenseIcon}
               gradient="red"
