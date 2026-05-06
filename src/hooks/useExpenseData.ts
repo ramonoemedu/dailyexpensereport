@@ -458,8 +458,8 @@ export function useExpenseData(options?: {
           if (!res.ok) throw new Error(payload?.error || "Failed to fetch expenses.");
 
           // Only update state and cache if data changed
-          const newSig = JSON.stringify({ rows: payload.rows, totalRows: payload.totalRows });
-          const oldSig = cached ? JSON.stringify({ rows: cached.rows, totalRows: cached.totalRows }) : null;
+          const newSig = JSON.stringify({ rows: payload.rows, totalRows: payload.totalRows, stats: payload.stats });
+          const oldSig = cached ? JSON.stringify({ rows: cached.rows, totalRows: cached.totalRows, stats: cached.stats }) : null;
           if (newSig !== oldSig) {
             cacheWrite(lsCacheKey, payload);
             applyPayload(payload);
