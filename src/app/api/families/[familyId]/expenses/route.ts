@@ -193,12 +193,56 @@ export async function GET(
         year: Number(b.year),
         month: Number(b.month),
         amount: Number(b.amount || 0),
+        amountKHR: Number(b.amountKHR || 0),
       }))
       .filter((b: any) => Number.isFinite(b.year) && Number.isFinite(b.month))
       .sort((a: any, b: any) => (a.year * 12 + a.month) - (b.year * 12 + b.month));
 
     const anchor = [...normalizedBalances].reverse().find((r: any) => (r.year * 12 + r.month) <= targetTime);
-    const startingBalance = anchor ? Number(anchor.amount || 0) : 0;
+    let startingBalance = anchor ? Number(anchor.amount || 0) : 0;
+    let startingBalanceKHR = anchor ? Number(anchor.amountKHR || 0) : 0;
+
+    // Carry forward transactions from anchor month up to (but not including) target month
+    if (anchor && (anchor.year * 12 + anchor.month) < targetTime) {
+      const anchorMonthStart = `${anchor.year}-${String(anchor.month + 1).padStart(2, "0")}-01`;
+      const prevMonthDate = new Date(year, month, 0);
+      const prevMonthEnd = `${prevMonthDate.getFullYear()}-${String(prevMonthDate.getMonth() + 1).padStart(2, "0")}-${String(prevMonthDate.getDate()).padStart(2, "0")}`;
+
+      const carrySnap = await db
+        .collection("families")
+        .doc(familyId)
+        .collection("expenses")
+        .where("Date", ">=", anchorMonthStart)
+        .where("Date", "<=", prevMonthEnd)
+        .get();
+
+      carrySnap.docs.forEach((d) => {
+        const raw = d.data();
+        const status = String(raw.status || "active");
+        if (statusFilter !== "all") {
+          if (statusFilter === "active" && status !== "active") return;
+          if (statusFilter === "inactive" && status !== "inactive") return;
+        }
+
+        const method = String(raw["Payment Method"] || raw["Payment_Method"] || "").toLowerCase().trim();
+        if (expandedPaymentFilters.length > 0) {
+          const pass = expandedPaymentFilters.some((f) => method.includes(f) || f.includes(method));
+          if (!pass) return;
+        }
+
+        const amount = Math.abs(Number(raw.Amount || raw.amount || 0));
+        const isIncome = String(raw.Type || raw.type || "Expense") === "Income";
+        const currency = String(raw.Currency || "USD");
+
+        if (currency === "KHR") {
+          if (isIncome) startingBalanceKHR += amount;
+          else startingBalanceKHR -= amount;
+        } else {
+          if (isIncome) startingBalance += amount;
+          else startingBalance -= amount;
+        }
+      });
+    }
 
     const stats = {
       weeklyIncome: 0,
@@ -209,10 +253,10 @@ export async function GET(
       totalExpense: monthlyExpense,
       startingBalance,
       currentBalance: startingBalance + monthlyIncome - monthlyExpense,
-      startingBalanceKHR: 0,
+      startingBalanceKHR,
       monthlyIncomeKHR: filteredStats.totalDebitKHR,
       monthlyExpenseKHR: filteredStats.totalCreditKHR,
-      currentBalanceKHR: 0 + filteredStats.totalDebitKHR - filteredStats.totalCreditKHR,
+      currentBalanceKHR: startingBalanceKHR + filteredStats.totalDebitKHR - filteredStats.totalCreditKHR,
     };
 
     return NextResponse.json({
