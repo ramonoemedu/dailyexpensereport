@@ -18,10 +18,8 @@ import {
 import { DatePicker, LocalizationProvider } from "@mui/x-date-pickers";
 import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
 import dayjs from "dayjs";
-import { auth, db } from "@/lib/firebase";
-import { doc, getDoc } from "firebase/firestore";
 import { useAuthContext } from "@/components/AuthProvider";
-import { columns, dateFields, dropdownFields, sanitizeKey, unsanitizeKey } from "@/utils/KeySanitizer";
+import { columns, dateFields, dropdownFields } from "@/utils/KeySanitizer";
 import saveAs from "file-saver";
 
 type Props = {
@@ -41,30 +39,21 @@ const EmployeeDetail: React.FC<Props> = ({ id, open, onClose, onSaved, dropdownO
     if (!id || !open || !currentFamilyId) return;
     const load = async () => {
       try {
-        const d = await getDoc(doc(db, "families", currentFamilyId, "expenses", id));
-        if (d.exists()) {
-          const raw = d.data();
-          const mapped: Record<string, any> = { id: d.id };
-          Object.keys(raw).forEach((k) => {
-            mapped[unsanitizeKey(k)] = raw[k];
-          });
-          // Normalize date fields to YYYY-MM-DD strings when possible
-          (dateFields || []).forEach((f) => {
-            const val = mapped[f];
-            if (!val && val !== 0) return;
-            // Firestore Timestamp
-            if (typeof val === "object" && typeof (val as any).toDate === "function") {
-              mapped[f] = dayjs((val as any).toDate()).format("YYYY-MM-DD");
-              return;
-            }
-            // plain string or Date
-            const parsed = dayjs(val);
-            if (parsed.isValid()) mapped[f] = parsed.format("YYYY-MM-DD");
-          });
-          setItem(mapped);
-        } else {
-          setItem(null);
-        }
+        const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null;
+        const res = await fetch(`/api/families/${currentFamilyId}/expenses/${id}`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (!res.ok) { setItem(null); return; }
+        const payload = await res.json();
+        const mapped: Record<string, any> = { ...(payload.expense || {}), id };
+        // Normalize date fields to YYYY-MM-DD strings
+        (dateFields || []).forEach((f) => {
+          const val = mapped[f];
+          if (!val && val !== 0) return;
+          const parsed = dayjs(val);
+          if (parsed.isValid()) mapped[f] = parsed.format("YYYY-MM-DD");
+        });
+        setItem(mapped);
       } catch (err) {
         console.error("Failed to load detail:", err);
         setItem(null);
@@ -81,24 +70,21 @@ const EmployeeDetail: React.FC<Props> = ({ id, open, onClose, onSaved, dropdownO
     if (!item || !item.id) return;
     setSaving(true);
     try {
-      const sanitized: Record<string, any> = {};
+      const data: Record<string, any> = {};
       Object.entries(item).forEach(([k, v]) => {
         if (k === "id") return;
         if ((dateFields || []).includes(k) && v) {
-          // handle Dayjs, Date, or Timestamp-like objects
-          if (typeof v === "object" && typeof (v as any).toDate === "function") {
-            sanitized[sanitizeKey(k)] = dayjs((v as any).toDate()).format("YYYY-MM-DD");
-          } else if (dayjs(v).isValid()) {
-            sanitized[sanitizeKey(k)] = dayjs(v).format("YYYY-MM-DD");
+          if (dayjs(v).isValid()) {
+            data[k] = dayjs(v).format("YYYY-MM-DD");
           } else {
-            sanitized[sanitizeKey(k)] = v;
+            data[k] = v;
           }
         } else {
-          sanitized[sanitizeKey(k)] = v;
+          data[k] = v;
         }
       });
       if (!currentFamilyId) throw new Error("No familyId set");
-      const token = await auth.currentUser?.getIdToken();
+      const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null;
       if (!token) throw new Error("Authentication token is missing.");
 
       const res = await fetch(`/api/families/${currentFamilyId}/expenses/${item.id}`, {
@@ -107,7 +93,7 @@ const EmployeeDetail: React.FC<Props> = ({ id, open, onClose, onSaved, dropdownO
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ data: sanitized }),
+        body: JSON.stringify({ data }),
       });
       const payload = await res.json();
       if (!res.ok) throw new Error(payload?.error || "Failed to save detail.");

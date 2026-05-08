@@ -66,7 +66,7 @@ export default function StartingBalancePage() {
   const { user, currentFamilyId, loading: authLoading } = useAuthContext();
 
   const getAuthHeaders = useCallback(async () => {
-    const token = await user?.getIdToken();
+    const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null;
     if (!token) {
       throw new Error('Authentication token is missing.');
     }

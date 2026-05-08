@@ -1,0 +1,114 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  uid             String   @id
+  fullName        String   @default("")
+  username        String   @unique
+  userId          String   @unique
+  email           String   @default("")
+  loginEmail      String   @default("")
+  passwordHash    String   @default("")
+  status          String   @default("active")
+  systemAdmin     Boolean  @default(false)
+  families        Json     @default("{}")
+  currentFamilyId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("users")
+}
+
+model Family {
+  id        String   @id @default(cuid())
+  name      String
+  status    String   @default("active")
+  createdBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members  FamilyMember[]
+  expenses Expense[]
+  settings FamilySettings?
+  reports  FamilyReport[]
+
+  @@map("families")
+}
+
+model FamilyMember {
+  familyId String
+  uid      String
+  role     String   @default("member")
+  fullName String   @default("")
+  email    String   @default("")
+  addedAt  DateTime @default(now())
+
+  family Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+
+  @@id([familyId, uid])
+  @@map("family_members")
+}
+
+model Expense {
+  id            String   @id @default(cuid())
+  familyId      String
+  date          String   // YYYY-MM-DD string, matches original Firestore field names
+  amount        Float    @default(0)
+  currency      String   @default("USD")
+  type          String   @default("Expense")
+  description   String   @default("")
+  category      String   @default("")
+  paymentMethod String   @default("")
+  status        String   @default("active")
+  importRef     String   @default("")
+  extraData     Json     @default("{}")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  family Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+
+  @@index([familyId, date])
+  @@map("expenses")
+}
+
+// Stores the family settings config (balances, cashBalances, expenseTypes, incomeTypes, incomeConfigs)
+model FamilySettings {
+  familyId  String   @id
+  config    Json     @default("{}")
+  updatedAt DateTime @updatedAt
+
+  family Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+
+  @@map("family_settings")
+}
+
+// Pre-computed report data.
+// reportKey examples: "dashboard_2026", "bank_chip-mong_2026"
+model FamilyReport {
+  familyId  String
+  reportKey String
+  data      Json     @default("{}")
+  updatedAt DateTime @updatedAt
+
+  family Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+
+  @@id([familyId, reportKey])
+  @@map("family_reports")
+}
+
+model PdfConversion {
+  id        String   @id @default(cuid())
+  userId    String
+  data      Json     @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@map("pdf_conversions")
+}

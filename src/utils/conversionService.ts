@@ -1,5 +1,3 @@
-import { auth } from '@/lib/firebase';
-
 export interface ConversionRecord {
   id?: string;
   userId: string;
@@ -14,8 +12,8 @@ export interface ConversionRecord {
 }
 
 export const conversionService = {
-  async getAuthHeaders() {
-    const token = await auth.currentUser?.getIdToken();
+  getAuthHeaders() {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null;
     if (!token) throw new Error('Authentication token is missing.');
     return {
       'Content-Type': 'application/json',
@@ -28,7 +26,7 @@ export const conversionService = {
     try {
       const res = await fetch('/api/conversions', {
         method: 'POST',
-        headers: await this.getAuthHeaders(),
+        headers: this.getAuthHeaders(),
         body: JSON.stringify({ record }),
       });
       const payload = await res.json();
@@ -45,7 +43,7 @@ export const conversionService = {
     try {
       const res = await fetch('/api/conversions', {
         method: 'GET',
-        headers: await this.getAuthHeaders(),
+        headers: this.getAuthHeaders(),
       });
       const payload = await res.json();
       if (!res.ok) throw new Error(payload?.error || 'Failed to fetch conversion history.');
@@ -74,7 +72,7 @@ export const conversionService = {
     try {
       const res = await fetch(`/api/conversions/${conversionId}`, {
         method: 'DELETE',
-        headers: await this.getAuthHeaders(),
+        headers: this.getAuthHeaders(),
       });
       const payload = await res.json();
       if (!res.ok) throw new Error(payload?.error || 'Failed to delete conversion record.');

@@ -1,60 +1,43 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
-
-function getBearerToken(req: NextRequest) {
-  const authHeader = req.headers.get("authorization") || "";
-  if (!authHeader.startsWith("Bearer ")) return null;
-  return authHeader.slice(7);
-}
-
-async function verifyUser(req: NextRequest) {
-  const token = getBearerToken(req);
-  if (!token) throw new Error("Missing bearer token");
-  const decoded = await getAdminAuth().verifyIdToken(token);
-  return decoded.uid;
-}
+import { NextRequest, NextResponse } from 'next/server';
+import { extractTokenPayload } from '@/lib/verifyFamilyAccess';
+import { getPrisma } from '@/lib/prisma';
+import { randomUUID } from 'crypto';
 
 export async function POST(req: NextRequest) {
   try {
-    const uid = await verifyUser(req);
+    const payload = extractTokenPayload(req);
     const body = await req.json();
     const record = (body?.record || {}) as Record<string, unknown>;
 
-    const payload = {
-      ...record,
-      userId: uid,
-      createdAt: new Date().toISOString(),
-    };
+    const conversion = await getPrisma().pdfConversion.create({
+      data: {
+        id: randomUUID(),
+        userId: payload.uid,
+        data: { ...record, userId: payload.uid },
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+    });
 
-    const ref = await getAdminDb().collection("pdf_conversions").add(payload);
-    return NextResponse.json({ id: ref.id }, { status: 201 });
+    return NextResponse.json({ id: conversion.id }, { status: 201 });
   } catch (error: any) {
-    return NextResponse.json({ error: error?.message || "Failed to save conversion." }, { status: 500 });
+    return NextResponse.json({ error: error?.message || 'Failed to save conversion.' }, { status: 500 });
   }
 }
 
 export async function GET(req: NextRequest) {
   try {
-    const uid = await verifyUser(req);
+    const payload = extractTokenPayload(req);
 
-    const snapshot = await getAdminDb()
-      .collection("pdf_conversions")
-      .where("userId", "==", uid)
-      .get();
+    const records = await getPrisma().pdfConversion.findMany({
+      where: { userId: payload.uid },
+      orderBy: { createdAt: 'desc' },
+    });
 
-    const records: Array<{ id: string } & Record<string, unknown>> = snapshot.docs
-      .map((doc) => ({
-        id: doc.id,
-        ...(doc.data() as Record<string, unknown>),
-      }))
-      .sort((a, b) => {
-        const aT = new Date(String((a as Record<string, unknown>)["createdAt"] ?? 0)).getTime();
-        const bT = new Date(String((b as Record<string, unknown>)["createdAt"] ?? 0)).getTime();
-        return bT - aT;
-      });
-
-    return NextResponse.json({ records });
+    return NextResponse.json({
+      records: records.map((r) => ({ id: r.id, ...(r.data as object), createdAt: r.createdAt })),
+    });
   } catch (error: any) {
-    return NextResponse.json({ error: error?.message || "Failed to load conversions." }, { status: 500 });
+    return NextResponse.json({ error: error?.message || 'Failed to load conversions.' }, { status: 500 });
   }
 }

@@ -31,7 +31,6 @@ import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import { useConfirm } from "@/hooks/NextAdmin/useConfirm";
 import { ConfirmationDialog } from "@/components/NextAdmin/ui/ConfirmationDialog";
-import { auth } from "@/lib/firebase";
 import {
   Table,
   TableBody,
@@ -83,7 +82,7 @@ export default function UserManagementPage() {
   });
 
   const getAuthHeaders = useCallback(async () => {
-    const token = await auth.currentUser?.getIdToken();
+    const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null;
     if (!token) throw new Error("Authentication token is missing.");
 
     return {

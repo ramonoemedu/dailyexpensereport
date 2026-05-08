@@ -11,7 +11,6 @@ import {
   Switch,
 } from "@mui/material";
 import GroupsIcon from "@mui/icons-material/Groups";
-import { auth } from "@/lib/firebase";
 import {
   Table,
   TableBody,
@@ -56,7 +55,7 @@ export default function FamilyManagementPage() {
   const [togglingId, setTogglingId] = useState<string | null>(null);
 
   const getAuthHeaders = useCallback(async () => {
-    const token = await auth.currentUser?.getIdToken();
+    const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null;
     if (!token) throw new Error("Authentication token is missing.");
     return {
       "Content-Type": "application/json",

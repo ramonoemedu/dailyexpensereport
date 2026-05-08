@@ -117,7 +117,7 @@ export default function OnboardingPage() {
     setSaving(true);
 
     try {
-      const token = await user.getIdToken();
+      const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null;
       const res = await fetch('/api/onboarding/complete', {
         method: 'POST',
         headers: {
@@ -164,12 +164,6 @@ export default function OnboardingPage() {
 
   const handleGoDashboard = async () => {
     setSummaryOpen(false);
-    try {
-      await user?.getIdToken(true);
-    } catch {
-      // Ignore token refresh failures; fallback reload still refreshes app state.
-    }
-
     // Force full reload so AuthProvider/useAuth re-resolves currentFamilyId from backend.
     window.location.assign('/');
   };

@@ -1,10 +1,13 @@
 'use client';
 
-import { db, auth } from "@/lib/firebase";
-import { collection, getDocs, doc, getDoc } from "firebase/firestore";
 import dayjs from "dayjs";
 import { autoCategorize } from "@/utils/DescriptionHelper";
 import { cacheRead, cacheWrite, cacheInvalidate } from "@/utils/clientCache";
+
+function getToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  return localStorage.getItem('authToken');
+}
 
 // ─── Dashboard Report API (single call, pre-computed server-side) ─────────────
 
@@ -34,10 +37,10 @@ export async function getDashboardData(
   statusFilter: 'active' | 'all' = 'active'
 ): Promise<any> {
   const key = dashboardCacheKey(familyId, year, month, statusFilter);
-  const cached = cacheRead<any>(key, Infinity); // No expiry — always serve cache, always bg-check
+  const cached = cacheRead<any>(key, Infinity);
 
   const fetchFresh = async () => {
-    const token = await auth.currentUser?.getIdToken();
+    const token = getToken();
     if (!token) throw new Error('Not authenticated');
     const r = await fetch(
       `/api/families/${familyId}/dashboard?year=${year}&month=${month}&statusFilter=${statusFilter}`,
@@ -51,7 +54,6 @@ export async function getDashboardData(
   };
 
   if (cached) {
-    // Background revalidation: check if report doc has newer data
     fetchFresh()
       .then(fresh => {
         const sig = (d: any) =>
@@ -69,30 +71,32 @@ export async function getDashboardData(
   cacheWrite(key, fresh);
   return fresh;
 }
-type RawDocsEntry = { docs: Array<{ id: string; data: Record<string, any> }> };
-const rawDocsInflight = new Map<string, Promise<RawDocsEntry["docs"]>>();
-const rawDocsCache = new Map<string, { docs: RawDocsEntry["docs"]; ts: number }>();
-const MEM_TTL_MS = 30_000; // 30 seconds — prevents duplicate bg fetches within same session
+
+// ─── All-expenses cache (used by getClearPortStats for client-side computation) ─
+
+type ExpenseRow = Record<string, any>;
+const rawDocsInflight = new Map<string, Promise<ExpenseRow[]>>();
+const rawDocsCache = new Map<string, { docs: ExpenseRow[]; ts: number }>();
+const MEM_TTL_MS = 30_000;
 const lsKey = (familyId: string) => `dex_rawdocs:${familyId}`;
 
-function docsSignature(docs: RawDocsEntry["docs"]): string {
+function docsSignature(docs: ExpenseRow[]): string {
   return docs.length + ':' + docs.map(d => d.id).sort().join(',');
 }
 
-function lsRead(familyId: string): RawDocsEntry["docs"] | null {
+function lsRead(familyId: string): ExpenseRow[] | null {
   try {
     const raw = localStorage.getItem(lsKey(familyId));
     if (!raw) return null;
-    const entry: { docs: RawDocsEntry["docs"]; ts: number } = JSON.parse(raw);
-    return entry.docs; // No TTL expiry — always serve cached, always bg-check
+    const entry: { docs: ExpenseRow[]; ts: number } = JSON.parse(raw);
+    return entry.docs;
   } catch { return null; }
 }
 
-function lsWrite(familyId: string, docs: RawDocsEntry["docs"]) {
+function lsWrite(familyId: string, docs: ExpenseRow[]) {
   try { localStorage.setItem(lsKey(familyId), JSON.stringify({ docs, ts: Date.now() })); } catch {}
 }
 
-// Listeners notified when background revalidation finds new data
 const dataUpdateListeners = new Set<(familyId: string) => void>();
 
 export function onDataUpdate(cb: (familyId: string) => void): () => void {
@@ -110,28 +114,34 @@ export function invalidateFamilyCache(familyId: string) {
   rawDocsCache.delete(familyId);
   rawDocsInflight.delete(familyId);
   try { localStorage.removeItem(lsKey(familyId)); } catch {}
-  // Also clear pre-computed report caches so next load fetches fresh data
   invalidateDashboardCache(familyId);
   invalidateBankReportCache(familyId);
-  // Clear server-paginated expense list cache
   cacheInvalidate(`expenses:${familyId}`);
 }
 
-async function getFamilyExpenseDocs(familyId: string): Promise<RawDocsEntry["docs"]> {
-  // 1. In-memory hit (fastest)
+async function fetchFreshExpenses(familyId: string): Promise<ExpenseRow[]> {
+  const token = getToken();
+  if (!token) throw new Error('Not authenticated');
+  const r = await fetch(
+    `/api/families/${familyId}/expenses?all=true`,
+    { cache: 'no-store', headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (!r.ok) throw new Error('Failed to fetch expenses');
+  const data = await r.json();
+  return data.rows || [];
+}
+
+async function getFamilyExpenseDocs(familyId: string): Promise<ExpenseRow[]> {
   const mem = rawDocsCache.get(familyId);
   if (mem && Date.now() - mem.ts < MEM_TTL_MS) return mem.docs;
 
-  // 2. localStorage hit → return immediately, revalidate in background
   const lsDocs = lsRead(familyId);
   if (lsDocs) {
     rawDocsCache.set(familyId, { docs: lsDocs, ts: Date.now() });
 
-    // Background revalidation (deduplicated)
     if (!rawDocsInflight.has(familyId)) {
       const cachedSig = docsSignature(lsDocs);
-      const bgPromise = getDocs(collection(db, "families", familyId, "expenses")).then(snap => {
-        const freshDocs = snap.docs.map(d => ({ id: d.id, data: d.data() as Record<string, any> }));
+      const bgPromise = fetchFreshExpenses(familyId).then(freshDocs => {
         rawDocsInflight.delete(familyId);
         if (docsSignature(freshDocs) !== cachedSig) {
           rawDocsCache.set(familyId, { docs: freshDocs, ts: Date.now() });
@@ -146,12 +156,10 @@ async function getFamilyExpenseDocs(familyId: string): Promise<RawDocsEntry["doc
     return lsDocs;
   }
 
-  // 3. No cache — fresh fetch (first load)
   const inflight = rawDocsInflight.get(familyId);
   if (inflight) return inflight;
 
-  const promise = getDocs(collection(db, "families", familyId, "expenses")).then(snap => {
-    const docs = snap.docs.map(d => ({ id: d.id, data: d.data() as Record<string, any> }));
+  const promise = fetchFreshExpenses(familyId).then(docs => {
     rawDocsCache.set(familyId, { docs, ts: Date.now() });
     lsWrite(familyId, docs);
     rawDocsInflight.delete(familyId);
@@ -163,8 +171,8 @@ async function getFamilyExpenseDocs(familyId: string): Promise<RawDocsEntry["doc
 }
 
 
-export async function getClearPortStats(month?: number, year?: number, options?: { 
-  paymentMethodFilter?: string | string[], 
+export async function getClearPortStats(month?: number, year?: number, options?: {
+  paymentMethodFilter?: string | string[],
   currencyFilter?: string,
   bankId?: string,
   statusFilter?: 'all' | 'active' | 'inactive',
@@ -180,7 +188,6 @@ export async function getClearPortStats(month?: number, year?: number, options?:
     const targetYear = year !== undefined ? year : now.year();
     const targetTime = targetYear * 12 + targetMonth;
 
-    // Core stats
     let monthlyTransactions = 0;
     let monthlyAmount = 0;
     let monthlyIncome = 0;
@@ -192,23 +199,26 @@ export async function getClearPortStats(month?: number, year?: number, options?:
     let yearlyExpense = 0;
     const categoryTotals: Record<string, number> = {};
 
-    // Balances
     let startingBalance = 0;
     let bankStartingBalance = 0;
     let cashStartingBalance = 0;
-    
+
     let bankMonthlyIncome = 0;
     let bankMonthlyExpense = 0;
     let cashMonthlyIncome = 0;
     let cashMonthlyExpense = 0;
 
     try {
+      const token = getToken();
       const isCashReport = options?.paymentMethodFilter === "Cash" || (Array.isArray(options?.paymentMethodFilter) && options?.paymentMethodFilter.includes("Cash") && options?.paymentMethodFilter.length === 1);
 
-      const configSnap = await getDoc(doc(db, "families", familyId, "settings", "config"));
-      const config = configSnap.exists() ? configSnap.data() as any : {};
-      const familyBankBalances = Array.isArray(config?.balances) ? config.balances : [];
-      const familyCashBalances = Array.isArray(config?.cashBalances) ? config.cashBalances : [];
+      const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {};
+      const [bankRes, cashRes] = await Promise.all([
+        fetch(`/api/families/${familyId}/balances`, { headers }),
+        fetch(`/api/families/${familyId}/cash-balances`, { headers }),
+      ]);
+      const { balances: familyBankBalancesRaw = [] } = bankRes.ok ? await bankRes.json() : { balances: [] };
+      const { balances: familyCashBalancesRaw = [] } = cashRes.ok ? await cashRes.json() : { balances: [] };
 
       const normalize = (arr: any[], useKHR = false) => arr
         .map((b) => ({
@@ -220,11 +230,11 @@ export async function getClearPortStats(month?: number, year?: number, options?:
         .sort((a, b) => (a.year * 12 + a.month) - (b.year * 12 + b.month));
 
       let balances = isCashReport
-        ? normalize(familyCashBalances, options?.currencyFilter === "KHR")
-        : normalize(options?.bankId ? familyBankBalances.filter((b: any) => b.bankId === options.bankId) : familyBankBalances, false);
+        ? normalize(familyCashBalancesRaw, options?.currencyFilter === "KHR")
+        : normalize(options?.bankId ? familyBankBalancesRaw.filter((b: any) => b.bankId === options.bankId) : familyBankBalancesRaw, false);
 
-      let bankBalances = normalize(familyBankBalances.filter((b: any) => b.bankId === "chip-mong"), false);
-      let cashBalances = normalize(familyCashBalances, false);
+      let bankBalances = normalize(familyBankBalancesRaw.filter((b: any) => b.bankId === "chip-mong"), false);
+      let cashBalances = normalize(familyCashBalancesRaw, false);
 
       const anchor = [...balances].reverse().find(r => (r.year * 12 + r.month) <= targetTime);
       if (anchor) startingBalance = anchor.amount;
@@ -237,37 +247,32 @@ export async function getClearPortStats(month?: number, year?: number, options?:
 
     } catch (e) { console.error("Balance fetch error:", e); }
 
-    rawDocs.forEach(({ id, data: rawData }) => {
-      const doc = { id };
-      const data = rawData;
-      const status = data.status || 'active';
+    rawDocs.forEach((row) => {
+      const status = row.status || 'active';
       const isRecordActive = status === 'active';
 
-      // Global status filter (respects 'active', 'inactive', 'all')
       if (options?.statusFilter && options.statusFilter !== 'all') {
         if (options.statusFilter === 'active' && !isRecordActive) return;
         if (options.statusFilter === 'inactive' && isRecordActive) return;
       } else if (!options?.statusFilter && !isRecordActive) {
-        // Default behavior for dashboard is Active only
         return;
       }
 
-      const methodRaw = data["Payment Method"] || data["Payment_Method"] || "";
+      const methodRaw = row["Payment Method"] || row["Payment_Method"] || "";
       const method = methodRaw.toString().toLowerCase().trim();
-      const amount = Math.abs(parseFloat(data.Amount || data.amount || 0));
-      const currency = data["Currency"] || data["currency"] || "USD";
-      const isIncome = (data.Type || data.type || "Expense").toLowerCase() === "income";
-      const dateStr = data.Date || data.date || data.createdAt;
-      
+      const amount = Math.abs(parseFloat(row.Amount || row.amount || 0));
+      const currency = row["Currency"] || row["currency"] || "USD";
+      const isIncome = (row.Type || row.type || "Expense").toLowerCase() === "income";
+      const dateStr = row.Date || row.date || row.createdAt;
+
       if (!dateStr) return;
       const date = dayjs(dateStr);
       if (!date.isValid()) return;
-      
+
       const isFuture = date.isAfter(now, 'day');
       const isTargetMonth = date.month() === targetMonth && date.year() === targetYear;
       const isTargetYear = date.year() === targetYear;
 
-      // 1. Bank/Cash Balance logic (Dashboard)
       if (!isFuture) {
         if (method.includes("cash")) {
           if (isIncome) cashMonthlyIncome += (isTargetMonth ? amount : 0);
@@ -278,7 +283,6 @@ export async function getClearPortStats(month?: number, year?: number, options?:
         }
       }
 
-      // 2. Filtered Stats (Cards & Reports)
       let passMethodFilter = true;
       if (options?.paymentMethodFilter) {
         const filterArray = Array.isArray(options.paymentMethodFilter) ? options.paymentMethodFilter : [options.paymentMethodFilter];
@@ -301,10 +305,10 @@ export async function getClearPortStats(month?: number, year?: number, options?:
         }
 
         if (isTargetMonth) {
-          const category = autoCategorize(data.Description || data.description || "", data.Category || data.category);
-          
+          const category = autoCategorize(row.Description || row.description || "", row.Category || row.category);
+
           monthlyTransactionsList.push({
-            id: doc.id, Date: dateStr, Description: data.Description || data.description || "No Description",
+            id: row.id, Date: dateStr, Description: row.Description || row.description || "No Description",
             Category: category, Amount: amount, Type: isIncome ? "Income" : "Expense",
             "Payment Method": methodRaw, Currency: currency, isFuture, status
           });
@@ -313,7 +317,7 @@ export async function getClearPortStats(month?: number, year?: number, options?:
             monthlyIncomeWithFuture += amount;
             if (!isFuture) {
               monthlyIncome += amount;
-              monthlyIncomeItems.push({ date: dateStr, description: data.Description || data.description || "Income", amount, isFuture });
+              monthlyIncomeItems.push({ date: dateStr, description: row.Description || row.description || "Income", amount, isFuture });
             }
           } else if (!isFuture) {
             monthlyTransactions++;
@@ -348,7 +352,7 @@ export async function getClearPortStats(month?: number, year?: number, options?:
     console.error("Error fetching expense stats:", error);
     return {
       monthlyTransactions: 0, monthlyAmount: 0, monthlyIncome: 0, monthlyIncomeWithFuture: 0,
-      maxExpense: 0, yearlyIncome: 0, yearlyExpense: 0, topCategory: "None", 
+      maxExpense: 0, yearlyIncome: 0, yearlyExpense: 0, topCategory: "None",
       targetMonth: 0, targetYear: 2026, startingBalance: 0, currentBalance: 0,
       bankBalance: 0, cashBalance: 0, growth: { total: 0, amount: 0 }
     };
@@ -358,7 +362,6 @@ export async function getClearPortStats(month?: number, year?: number, options?:
 export async function getClearanceTimelineData(year?: number, familyId?: string) {
   if (!familyId) return { income: [], expense: [] };
   try {
-    // Use the pre-computed dashboard report (current month of that year to get the full timeline)
     const data = await getDashboardData(dayjs().month(), year || dayjs().year(), familyId);
     return data.timeline || { income: [], expense: [] };
   } catch (error) {
@@ -412,7 +415,7 @@ export async function rebuildBankReportData(
   month: number
 ): Promise<{ transactions: any[]; startingBalance: number }> {
   const key = bankReportCacheKey(familyId, bankId, year, month);
-  const token = await auth.currentUser?.getIdToken();
+  const token = getToken();
   if (!token) throw new Error('Not authenticated');
   const r = await fetch(
     `/api/families/${familyId}/bank-report/${bankId}?year=${year}&month=${month}&rebuild=true`,
@@ -438,7 +441,7 @@ export async function getBankReportData(
   const cached = cacheRead<any>(key, Infinity);
 
   const fetchFresh = async () => {
-    const token = await auth.currentUser?.getIdToken();
+    const token = getToken();
     if (!token) throw new Error('Not authenticated');
     const r = await fetch(
       `/api/families/${familyId}/bank-report/${bankId}?year=${year}&month=${month}`,
@@ -452,7 +455,6 @@ export async function getBankReportData(
   };
 
   if (cached) {
-    // Only background-revalidate if cache is older than 5 minutes
     const cacheAge = Date.now() - (cached._cachedAt || 0);
     if (cacheAge > 5 * 60_000) {
       fetchFresh().then(fresh => {

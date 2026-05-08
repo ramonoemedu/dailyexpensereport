@@ -196,8 +196,7 @@ export default function MonthlyReportPage() {
     setImporting(true);
     setImportError('');
     try {
-      const { auth } = await import('@/lib/firebase');
-      const token = await auth.currentUser?.getIdToken();
+      const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null;
       const form = new FormData();
       form.append('file', file);
       form.append('bankId', bankId);
@@ -226,8 +225,7 @@ export default function MonthlyReportPage() {
     setImporting(true);
     setImportError('');
     try {
-      const { auth } = await import('@/lib/firebase');
-      const token = await auth.currentUser?.getIdToken();
+      const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null;
       const toImport = importTxns.filter(t => selectedImportIds.has(t.id));
       const res = await fetch(`/api/families/${currentFamilyId}/import/bank-statement/confirm`, {
         method: 'POST',

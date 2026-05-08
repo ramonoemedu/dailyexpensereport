@@ -1,0 +1,58 @@
+# Server-side docker-compose.yml
+# Place this file on your server at: /root/opt/traefik/project/dailyexpensereport/docker-compose.yml
+# Run: docker compose up -d
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: dailyexpense-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: DailyStr0ngPass2026
+      POSTGRES_DB: dailyexpense
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d dailyexpense']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - myapp
+    volumes:
+      - dailyexpense_pgdata:/var/lib/postgresql/data
+
+  app:
+    image: ramonoemxx/dailyexpensereport:main-latest
+    container_name: dailyexpense-app
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://postgres:DailyStr0ngPass2026@dailyexpense-postgres:5432/dailyexpense
+      JWT_SECRET: 'CHANGE_THIS_TO_A_STRONG_RANDOM_64_CHAR_SECRET'
+      # Telegram notifications (optional)
+      TELEGRAM_BOT_TOKEN: ''
+      TELEGRAM_CHAT_ID: ''
+      TELEGRAM_TOPIC_ID: ''
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - myapp
+    labels:
+      - 'traefik.enable=true'
+      - 'traefik.http.routers.dailyexpense.rule=Host(`expense.lostandprofit.me`)'
+      - 'traefik.http.routers.dailyexpense.entrypoints=websecure'
+      - 'traefik.http.routers.dailyexpense.tls=true'
+      - 'traefik.http.routers.dailyexpense.tls.certresolver=letsencrypt'
+      - 'traefik.http.routers.dailyexpense.service=dailyexpense-service'
+      - 'traefik.http.services.dailyexpense-service.loadbalancer.server.port=3000'
+      - 'traefik.docker.network=myapp'
+
+networks:
+  myapp:
+    external: true
+
+volumes:
+  dailyexpense_pgdata:
+
+name: dailyexpensereport

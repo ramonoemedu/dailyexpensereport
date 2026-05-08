@@ -2,12 +2,6 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { auth } from '@/lib/firebase';
-import {
-  signInWithEmailAndPassword,
-  GoogleAuthProvider,
-  signInWithPopup
-} from "firebase/auth";
 import {
   Box,
   Button,
@@ -15,12 +9,10 @@ import {
   Typography,
   Paper,
   Alert,
-  Divider,
   InputAdornment,
   IconButton,
   CircularProgress
 } from '@mui/material';
-import GoogleIcon from '@mui/icons-material/Google';
 import PersonOutlineIcon from '@mui/icons-material/PersonOutline';
 import VpnKeyOutlineIcon from '@mui/icons-material/VpnKeyOutlined';
 import Visibility from '@mui/icons-material/Visibility';
@@ -45,23 +37,8 @@ export default function LoginPage() {
   const [registerConfirmPassword, setRegisterConfirmPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [googleLoading, setGoogleLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const router = useRouter();
-
-  const handleGoogleLogin = async () => {
-    setError('');
-    setGoogleLoading(true);
-    const provider = new GoogleAuthProvider();
-    try {
-      await signInWithPopup(auth, provider);
-      router.push('/');
-    } catch (err: any) {
-      setError(err.code === 'auth/popup-blocked' ? "Popup blocked! Please allow popups." : err.message);
-    } finally {
-      setGoogleLoading(false);
-    }
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -70,30 +47,19 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      let loginEmail = identifier.trim();
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier: identifier.trim(), password }),
+      });
 
-      if (!identifier.includes('@')) {
-        const resolveRes = await fetch('/api/auth/resolve-identifier', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ identifier: identifier.trim() }),
-        });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Login failed.');
 
-        const resolveData = await resolveRes.json();
-        if (!resolveRes.ok) {
-          throw new Error(resolveData.error || 'Login system error. Please try again later.');
-        }
-
-        loginEmail = resolveData.loginEmail;
-      }
-
-      await signInWithEmailAndPassword(auth, loginEmail, password);
+      localStorage.setItem('authToken', data.token);
       router.push('/');
     } catch (err: any) {
-      console.error(err);
-      let msg = err.message;
-      if (err.code === 'auth/invalid-credential') msg = "Incorrect identifier or password.";
-      setError(msg);
+      setError(err.message || 'Login failed.');
     } finally {
       setLoading(false);
     }
@@ -108,7 +74,6 @@ export default function LoginPage() {
       setError('Please fill all required fields.');
       return;
     }
-
     if (registerPassword !== registerConfirmPassword) {
       setError('Passwords do not match.');
       return;
@@ -129,22 +94,25 @@ export default function LoginPage() {
       });
 
       const registerData = await registerRes.json();
-      if (!registerRes.ok) {
-        throw new Error(registerData?.error || 'Registration failed.');
-      }
+      if (!registerRes.ok) throw new Error(registerData?.error || 'Registration failed.');
 
-      await signInWithEmailAndPassword(auth, registerEmail.trim().toLowerCase(), registerPassword);
+      // Auto login after registration
+      const loginRes = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier: registerEmail.trim().toLowerCase(), password: registerPassword }),
+      });
+      const loginData = await loginRes.json();
+      if (!loginRes.ok) throw new Error(loginData?.error || 'Login failed after registration.');
+
+      localStorage.setItem('authToken', loginData.token);
       router.push('/');
     } catch (err: any) {
-      let msg = err.message || 'Registration failed.';
-      if (err.code === 'auth/email-already-in-use') msg = 'Email already exists.';
-      setError(msg);
+      setError(err.message || 'Registration failed.');
     } finally {
       setLoading(false);
     }
   };
-
-  const isFormDisabled = loading || googleLoading;
 
   return (
     <Box
@@ -186,37 +154,6 @@ export default function LoginPage() {
           </Typography>
         </Box>
 
-        {mode === 'login' && (
-          <>
-            <Button
-              fullWidth
-              variant="outlined"
-              size="large"
-              disabled={isFormDisabled}
-              onClick={handleGoogleLogin}
-              startIcon={googleLoading ? <CircularProgress size={20} /> : <GoogleIcon />}
-              sx={{
-                py: 1.5,
-                borderRadius: '16px',
-                textTransform: 'none',
-                fontWeight: 700,
-                borderColor: '#E2E8F0',
-                color: '#475569',
-                mb: 3,
-                '&:hover': { borderColor: '#CBD5E1', bgcolor: 'rgba(248, 250, 252, 0.8)' }
-              }}
-            >
-              {googleLoading ? 'Redirecting...' : 'Continue with Google'}
-            </Button>
-
-            <Divider sx={{ width: '100%', mb: 3 }}>
-              <Typography variant="caption" sx={{ color: '#94A3B8', fontWeight: 700, textTransform: 'uppercase' }}>
-                Or use account
-              </Typography>
-            </Divider>
-          </>
-        )}
-
         {error && (
           <Box sx={{ width: '100%', mb: 3 }}>
             <Alert severity="error" sx={{ borderRadius: '16px', fontWeight: 600 }}>{error}</Alert>
@@ -229,7 +166,7 @@ export default function LoginPage() {
               margin="normal"
               fullWidth
               label="Username, User ID or Email"
-              disabled={isFormDisabled}
+              disabled={loading}
               value={identifier}
               onChange={(e) => setIdentifier(e.target.value)}
               placeholder="e.g. ramonoem"
@@ -248,7 +185,7 @@ export default function LoginPage() {
               margin="normal"
               fullWidth
               label="Password"
-              disabled={isFormDisabled}
+              disabled={loading}
               type={showPassword ? 'text' : 'password'}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
@@ -261,7 +198,7 @@ export default function LoginPage() {
                 ),
                 endAdornment: (
                   <InputAdornment position="end">
-                    <IconButton onClick={() => setShowPassword(!showPassword)} edge="end" disabled={isFormDisabled}>
+                    <IconButton onClick={() => setShowPassword(!showPassword)} edge="end" disabled={loading}>
                       {showPassword ? <VisibilityOff /> : <Visibility />}
                     </IconButton>
                   </InputAdornment>
@@ -270,13 +207,11 @@ export default function LoginPage() {
               sx={{ mb: 2, '& .MuiOutlinedInput-root': { borderRadius: '16px', bgcolor: '#F8FAFC' } }}
               required
             />
-
-
             <Button
               type="submit"
               fullWidth
               variant="contained"
-              disabled={isFormDisabled}
+              disabled={loading}
               sx={{
                 py: 2,
                 fontWeight: 800,
@@ -288,58 +223,36 @@ export default function LoginPage() {
                 '&:hover': { bgcolor: '#0052CC', boxShadow: '0 20px 25px -5px rgba(0, 107, 255, 0.4)' }
               }}
             >
-              {loading ? 'Authenticating...' : 'Sign In'}
+              {loading ? <CircularProgress size={22} color="inherit" /> : 'Sign In'}
             </Button>
           </Box>
         ) : (
           <Box component="form" onSubmit={handleRegister} sx={{ width: '100%' }}>
-            <TextField
-              margin="normal"
-              fullWidth
-              label="Full Name"
-              disabled={isFormDisabled}
-              value={registerFullName}
-              onChange={(e) => setRegisterFullName(e.target.value)}
-              sx={{ mb: 2, '& .MuiOutlinedInput-root': { borderRadius: '16px', bgcolor: '#F8FAFC' } }}
-              required
-            />
-            <TextField
-              margin="normal"
-              fullWidth
-              label="Username"
-              disabled={isFormDisabled}
-              value={registerUsername}
-              onChange={(e) => setRegisterUsername(e.target.value.toLowerCase())}
-              sx={{ mb: 2, '& .MuiOutlinedInput-root': { borderRadius: '16px', bgcolor: '#F8FAFC' } }}
-              required
-            />
-            <TextField
-              margin="normal"
-              fullWidth
-              label="User ID"
-              disabled={isFormDisabled}
-              value={registerUserId}
-              onChange={(e) => setRegisterUserId(e.target.value)}
-              sx={{ mb: 2, '& .MuiOutlinedInput-root': { borderRadius: '16px', bgcolor: '#F8FAFC' } }}
-              required
-            />
-            <TextField
-              margin="normal"
-              fullWidth
-              label="Email"
-              type="email"
-              disabled={isFormDisabled}
-              value={registerEmail}
-              onChange={(e) => setRegisterEmail(e.target.value)}
-              autoComplete="email"
-              sx={{ mb: 2, '& .MuiOutlinedInput-root': { borderRadius: '16px', bgcolor: '#F8FAFC' } }}
-              required
-            />
+            {[
+              { label: 'Full Name', value: registerFullName, setter: setRegisterFullName, auto: 'name' },
+              { label: 'Username', value: registerUsername, setter: (v: string) => setRegisterUsername(v.toLowerCase()), auto: 'username' },
+              { label: 'User ID', value: registerUserId, setter: setRegisterUserId, auto: 'off' },
+              { label: 'Email', value: registerEmail, setter: setRegisterEmail, auto: 'email', type: 'email' },
+            ].map(({ label, value, setter, auto, type }) => (
+              <TextField
+                key={label}
+                margin="normal"
+                fullWidth
+                label={label}
+                disabled={loading}
+                value={value}
+                onChange={(e) => setter(e.target.value)}
+                autoComplete={auto}
+                type={type || 'text'}
+                sx={{ mb: 2, '& .MuiOutlinedInput-root': { borderRadius: '16px', bgcolor: '#F8FAFC' } }}
+                required
+              />
+            ))}
             <TextField
               margin="normal"
               fullWidth
               label="Password"
-              disabled={isFormDisabled}
+              disabled={loading}
               type={showPassword ? 'text' : 'password'}
               value={registerPassword}
               onChange={(e) => setRegisterPassword(e.target.value)}
@@ -350,19 +263,18 @@ export default function LoginPage() {
               margin="normal"
               fullWidth
               label="Confirm Password"
-              disabled={isFormDisabled}
+              disabled={loading}
               type={showPassword ? 'text' : 'password'}
               value={registerConfirmPassword}
               onChange={(e) => setRegisterConfirmPassword(e.target.value)}
               sx={{ mb: 3, '& .MuiOutlinedInput-root': { borderRadius: '16px', bgcolor: '#F8FAFC' } }}
               required
             />
-
             <Button
               type="submit"
               fullWidth
               variant="contained"
-              disabled={isFormDisabled}
+              disabled={loading}
               sx={{
                 py: 2,
                 fontWeight: 800,
@@ -374,7 +286,7 @@ export default function LoginPage() {
                 '&:hover': { bgcolor: '#0052CC', boxShadow: '0 20px 25px -5px rgba(0, 107, 255, 0.4)' }
               }}
             >
-              {loading ? 'Creating Account...' : 'Create Account'}
+              {loading ? <CircularProgress size={22} color="inherit" /> : 'Create Account'}
             </Button>
           </Box>
         )}
@@ -383,11 +295,8 @@ export default function LoginPage() {
           <Button
             variant="text"
             fullWidth
-            disabled={isFormDisabled}
-            onClick={() => {
-              setError('');
-              setMode((m) => (m === 'login' ? 'register' : 'login'));
-            }}
+            disabled={loading}
+            onClick={() => { setError(''); setMode((m) => (m === 'login' ? 'register' : 'login')); }}
             sx={{ textTransform: 'none', fontWeight: 700 }}
           >
             {mode === 'login' ? 'New here? Create an account' : 'Already have an account? Sign in'}

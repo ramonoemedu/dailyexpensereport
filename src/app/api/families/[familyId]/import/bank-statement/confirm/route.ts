@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyFamilyAccess } from '@/lib/verifyFamilyAccess';
-import { getAdminDb } from '@/lib/firebaseAdmin';
+import { getPrisma } from '@/lib/prisma';
 import { autoCategorize } from '@/utils/DescriptionHelper';
 import { rebuildMonthReport, rebuildBankReport } from '@/lib/dashboardReport';
 import { BANKS } from '@/utils/bankConstants';
+import { randomUUID } from 'crypto';
 
 export const runtime = 'nodejs';
 
@@ -31,55 +32,41 @@ export async function POST(
       return NextResponse.json({ error: 'No transactions to import' }, { status: 400 });
     }
 
-    const db = getAdminDb();
-    const now = new Date().toISOString();
+    const prisma = getPrisma();
+    const now = new Date();
     const paymentMethod = bankId === 'chip-mong' ? 'Chip Mong Bank' : bankId;
     const affectedMonths = new Set<string>();
 
-    // Firestore batch limit is 500 — chunk if needed
-    const chunks: typeof transactions[] = [];
-    for (let i = 0; i < transactions.length; i += 400) {
-      chunks.push(transactions.slice(i, i + 400));
-    }
-
-    let totalImported = 0;
-    for (const chunk of chunks) {
-      const batch = db.batch();
-      for (const tx of chunk) {
-        const ref = db
-          .collection('families').doc(familyId)
-          .collection('expenses').doc();
-
-        batch.set(ref, {
-          Date: tx.date,
-          Description: tx.description,
-          Amount: tx.amount,
-          Type: tx.type,
-          Currency: tx.currency,
-          'Payment Method': paymentMethod,
-          Category: autoCategorize(tx.description, ''),
-          status: 'active',
-          createdAt: now,
-          importRef: tx.refNo || '',
-        });
-
+    await prisma.expense.createMany({
+      data: transactions.map((tx) => {
         const d = new Date(tx.date);
-        if (!isNaN(d.getTime())) {
-          affectedMonths.add(`${d.getFullYear()}:${d.getMonth()}`);
-        }
-        totalImported++;
-      }
-      await batch.commit();
-    }
+        if (!isNaN(d.getTime())) affectedMonths.add(`${d.getFullYear()}:${d.getMonth()}`);
+        return {
+          id: randomUUID(),
+          familyId,
+          date: tx.date,
+          description: tx.description,
+          amount: tx.amount,
+          type: tx.type,
+          currency: tx.currency,
+          paymentMethod,
+          category: autoCategorize(tx.description, ''),
+          status: 'active',
+          importRef: tx.refNo || '',
+          extraData: {},
+          createdAt: now,
+          updatedAt: now,
+        };
+      }),
+    });
 
-    // Rebuild reports for all affected months (non-blocking)
     for (const key of affectedMonths) {
       const [year, month] = key.split(':').map(Number);
       rebuildMonthReport(familyId, year, month).catch(() => {});
-      BANKS.forEach(b => rebuildBankReport(familyId, b.id, year, month).catch(() => {}));
+      BANKS.forEach((b) => rebuildBankReport(familyId, b.id, year, month).catch(() => {}));
     }
 
-    return NextResponse.json({ imported: totalImported });
+    return NextResponse.json({ imported: transactions.length });
   } catch (err: any) {
     console.error('[import/confirm]', err);
     return NextResponse.json({ error: err?.message || 'Import failed' }, { status: 500 });

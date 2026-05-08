@@ -1,8 +1,18 @@
-import { signInWithEmailAndPassword } from "firebase/auth";
-import { auth } from "@/lib/firebase";
+export async function signInUser({ identifier, password }: { identifier: string; password: string }) {
+  const res = await fetch('/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ identifier, password }),
+  });
 
-export async function signInUser({ email, password }: { email: string, password: string }) {
-  // You can add additional logic here if needed (e.g., check user status, families, etc.)
-  const userCredential = await signInWithEmailAndPassword(auth, email, password);
-  return userCredential;
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data?.error || 'Login failed.');
+  }
+
+  if (typeof window !== 'undefined') {
+    localStorage.setItem('authToken', data.token);
+  }
+
+  return data;
 }

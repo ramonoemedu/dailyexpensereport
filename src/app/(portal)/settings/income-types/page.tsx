@@ -70,7 +70,7 @@ export default function IncomeTypesPage() {
   const [processDate, setProcessDate] = useState<dayjs.Dayjs | null>(dayjs());
 
   const getAuthHeaders = useCallback(async () => {
-    const token = await user?.getIdToken();
+    const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null;
     if (!token) throw new Error('Authentication token is missing.');
     return {
       'Content-Type': 'application/json',

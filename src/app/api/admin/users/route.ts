@@ -1,187 +1,73 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
-
-type SystemUserDoc = {
-  fullName: string;
-  username: string;
-  userId: string;
-  email?: string;
-  loginEmail: string;
-  status: "active" | "inactive";
-  uid: string;
-  families?: Record<string, string>;
-  createdAt: string;
-};
+import { NextRequest, NextResponse } from 'next/server';
+import { hash } from 'bcryptjs';
+import { extractTokenPayload } from '@/lib/verifyFamilyAccess';
+import { getPrisma } from '@/lib/prisma';
+import { randomUUID } from 'crypto';
 
 function getBearerToken(req: NextRequest) {
-  const authHeader = req.headers.get("authorization") || "";
-  if (!authHeader.startsWith("Bearer ")) return null;
+  const authHeader = req.headers.get('authorization') || '';
+  if (!authHeader.startsWith('Bearer ')) return null;
   return authHeader.slice(7);
 }
 
 function getRequestedFamilyId(req: NextRequest) {
-  const headerFamilyId = req.headers.get("x-family-id");
-  if (headerFamilyId) return headerFamilyId;
-
-  const url = new URL(req.url);
-  return url.searchParams.get("familyId");
+  return req.headers.get('x-family-id') || new URL(req.url).searchParams.get('familyId');
 }
 
 async function verifyAdmin(req: NextRequest) {
-  const token = getBearerToken(req);
-  if (!token) {
-    throw new Error("Missing bearer token");
-  }
+  const payload = extractTokenPayload(req);
+  const prisma = getPrisma();
 
-  const decoded = await getAdminAuth().verifyIdToken(token);
-  const db = getAdminDb();
-  let adminSnap = await db.collection("system_users").doc(decoded.uid).get();
+  const user = await prisma.user.findUnique({ where: { uid: payload.uid } });
+  if (!user) throw new Error('Admin profile not found');
 
-  if (!adminSnap.exists) {
-    const byUid = await db.collection("system_users").where("uid", "==", decoded.uid).limit(1).get();
-    if (!byUid.empty) {
-      adminSnap = byUid.docs[0];
-    }
-  }
-
-  if (!adminSnap.exists && decoded.email) {
-    const byLoginEmail = await db
-      .collection("system_users")
-      .where("loginEmail", "==", decoded.email)
-      .limit(1)
-      .get();
-
-    if (!byLoginEmail.empty) {
-      adminSnap = byLoginEmail.docs[0];
-    }
-  }
-
-  if (!adminSnap.exists && decoded.email) {
-    const byEmail = await db
-      .collection("system_users")
-      .where("email", "==", decoded.email)
-      .limit(1)
-      .get();
-
-    if (!byEmail.empty) {
-      adminSnap = byEmail.docs[0];
-    }
-  }
-
-  if (!adminSnap.exists) {
-    throw new Error("Admin profile not found");
-  }
-
-  const adminProfile = adminSnap.data() as { families?: Record<string, string> };
-  const families = adminProfile?.families || {};
+  const families = user.families as Record<string, string>;
   const adminFamilyIds = Object.entries(families)
-    .filter(([, role]) => role === "admin")
-    .map(([familyId]) => familyId);
-  const isAdmin = adminFamilyIds.length > 0;
-  if (!isAdmin) {
-    throw new Error("Admin access required");
-  }
+    .filter(([, role]) => role === 'admin')
+    .map(([fid]) => fid);
+
+  if (!user.systemAdmin && adminFamilyIds.length === 0) throw new Error('Admin access required');
 
   const requestedFamilyId = getRequestedFamilyId(req);
-  if (requestedFamilyId && !adminFamilyIds.includes(requestedFamilyId)) {
-    throw new Error("Admin access required for selected family");
+  if (requestedFamilyId && !user.systemAdmin && !adminFamilyIds.includes(requestedFamilyId)) {
+    throw new Error('Admin access required for selected family');
   }
 
   const primaryFamilyId = requestedFamilyId || adminFamilyIds[0] || null;
-  return { uid: (adminProfile as any)?.uid || adminSnap.id, primaryFamilyId };
+  return { uid: user.uid, primaryFamilyId, isSystemAdmin: user.systemAdmin };
 }
 
 export async function GET(req: NextRequest) {
   try {
     const { primaryFamilyId } = await verifyAdmin(req);
-    if (!primaryFamilyId) {
-      return NextResponse.json({ users: [] });
-    }
+    if (!primaryFamilyId) return NextResponse.json({ users: [] });
 
-    const membersSnap = await getAdminDb()
-      .collection("families")
-      .doc(primaryFamilyId)
-      .collection("members")
-      .get();
+    const prisma = getPrisma();
+    const members = await prisma.familyMember.findMany({ where: { familyId: primaryFamilyId } });
+    const memberUids = [...new Set(members.map((m) => m.uid))];
 
-    const memberUids = Array.from(
-      new Set(
-        membersSnap.docs
-          .map((doc) => {
-            const data = doc.data() as { uid?: string };
-            return data?.uid || doc.id;
-          })
-          .filter((uid) => Boolean(uid))
-      )
-    );
+    if (memberUids.length === 0) return NextResponse.json({ users: [] });
 
-    const mapUserDoc = (doc: FirebaseFirestore.DocumentSnapshot) => {
-      const data = doc.data() as Partial<SystemUserDoc>;
-      const resolvedUid = data.uid || doc.id;
-      const loginEmail = data.loginEmail || data.email || "";
-      const username =
-        data.username ||
-        (loginEmail.includes("@") ? loginEmail.split("@")[0] : "") ||
-        resolvedUid.slice(0, 8);
-      const fullName = data.fullName || username;
-      return {
-        id: doc.id,
-        uid: resolvedUid,
-        fullName,
-        username,
-        loginEmail,
-        userId: data.userId || `USR-${resolvedUid.slice(0, 4).toUpperCase()}`,
-        status: (data.status || "active") as "active" | "inactive",
-        email: data.email || loginEmail,
-      };
-    };
+    const users = await prisma.user.findMany({
+      where: { uid: { in: memberUids } },
+      select: { uid: true, fullName: true, username: true, userId: true, loginEmail: true, email: true, status: true },
+    });
 
-    // If members subcollection is empty, fall back to querying system_users by family membership
-    if (memberUids.length === 0) {
-      const byFamily = await getAdminDb()
-        .collection("system_users")
-        .where(`families.${primaryFamilyId}`, "in", ["admin", "member", "viewer"])
-        .get();
+    const result = users.map((u) => ({
+      id: u.uid,
+      uid: u.uid,
+      fullName: u.fullName || u.username,
+      username: u.username,
+      loginEmail: u.loginEmail || u.email,
+      userId: u.userId,
+      status: u.status as 'active' | 'inactive',
+      email: u.email || u.loginEmail,
+    })).sort((a, b) => a.username.localeCompare(b.username));
 
-      if (byFamily.empty) {
-        return NextResponse.json({ users: [] });
-      }
-
-      const users = byFamily.docs
-        .filter((doc) => doc.exists)
-        .map(mapUserDoc)
-        .filter((user, index, arr) => arr.findIndex((u) => u.uid === user.uid) === index)
-        .sort((a, b) => a.username.localeCompare(b.username));
-
-      return NextResponse.json({ users });
-    }
-
-    const userDocs = await Promise.all(
-      memberUids.map(async (uid) => {
-        const direct = await getAdminDb().collection("system_users").doc(uid).get();
-        if (direct.exists) return direct;
-
-        const byUid = await getAdminDb()
-          .collection("system_users")
-          .where("uid", "==", uid)
-          .limit(1)
-          .get();
-
-        if (!byUid.empty) return byUid.docs[0];
-        return null;
-      })
-    );
-
-    const users = userDocs
-      .filter((doc) => !!doc && doc.exists)
-      .map((doc) => mapUserDoc(doc!))
-      .filter((user, index, arr) => arr.findIndex((u) => u.uid === user.uid) === index)
-      .sort((a, b) => a.username.localeCompare(b.username));
-
-    return NextResponse.json({ users });
+    return NextResponse.json({ users: result });
   } catch (error: any) {
-    const message = error?.message || "Unauthorized";
-    const status = message.includes("Admin") || message.includes("token") ? 403 : 401;
+    const message = error?.message || 'Unauthorized';
+    const status = message.includes('Admin') || message.includes('token') ? 403 : 401;
     return NextResponse.json({ error: message }, { status });
   }
 }
@@ -191,80 +77,50 @@ export async function POST(req: NextRequest) {
     const { primaryFamilyId } = await verifyAdmin(req);
     const body = await req.json();
 
-    const fullName = String(body?.fullName || "").trim();
-    const username = String(body?.username || "").trim().toLowerCase();
-    const userId = String(body?.userId || "").trim();
-    const password = String(body?.password || "");
-    const status = body?.status === "inactive" ? "inactive" : "active";
-    const email = String(body?.email || "").trim();
-    const loginEmail = String(body?.loginEmail || "").trim() || (email || `${username}@clearport.local`);
+    const fullName = String(body?.fullName || '').trim();
+    const username = String(body?.username || '').trim().toLowerCase();
+    const userId = String(body?.userId || '').trim();
+    const password = String(body?.password || '');
+    const status = body?.status === 'inactive' ? 'inactive' : 'active';
+    const email = String(body?.email || '').trim();
+    const loginEmail = String(body?.loginEmail || '').trim() || email || `${username}@clearport.local`;
 
     if (!fullName || !username || !password || !userId) {
-      return NextResponse.json({ error: "Missing required fields." }, { status: 400 });
+      return NextResponse.json({ error: 'Missing required fields.' }, { status: 400 });
     }
 
-    const duplicateUsername = await getAdminDb()
-      .collection("system_users")
-      .where("username", "==", username)
-      .limit(1)
-      .get();
+    const prisma = getPrisma();
+    const [dupeUsername, dupeUserId] = await Promise.all([
+      prisma.user.findUnique({ where: { username } }),
+      prisma.user.findUnique({ where: { userId } }),
+    ]);
 
-    if (!duplicateUsername.empty) {
-      return NextResponse.json({ error: "Username already exists." }, { status: 409 });
-    }
+    if (dupeUsername) return NextResponse.json({ error: 'Username already exists.' }, { status: 409 });
+    if (dupeUserId) return NextResponse.json({ error: 'User ID already exists.' }, { status: 409 });
 
-    const duplicateUserId = await getAdminDb()
-      .collection("system_users")
-      .where("userId", "==", userId)
-      .limit(1)
-      .get();
+    const uid = randomUUID();
+    const passwordHash = await hash(password, 12);
+    const families = primaryFamilyId ? { [primaryFamilyId]: 'member' } : {};
+    const now = new Date();
 
-    if (!duplicateUserId.empty) {
-      return NextResponse.json({ error: "User ID already exists." }, { status: 409 });
-    }
-
-    const authUser = await getAdminAuth().createUser({
-      email: loginEmail,
-      password,
-      displayName: fullName,
-      disabled: status === "inactive",
+    await prisma.user.create({
+      data: {
+        uid, fullName, username, userId, email, loginEmail, passwordHash,
+        status, families, createdAt: now, updatedAt: now,
+      },
     });
 
-    const families = primaryFamilyId ? { [primaryFamilyId]: "member" } : {};
-    const newUserDoc: SystemUserDoc = {
-      fullName,
-      username,
-      userId,
-      email,
-      loginEmail,
-      status,
-      uid: authUser.uid,
-      families,
-      createdAt: new Date().toISOString(),
-    };
-
-    await getAdminDb().collection("system_users").doc(authUser.uid).set(newUserDoc);
-
     if (primaryFamilyId) {
-      const now = new Date().toISOString();
-      await getAdminDb()
-        .collection("families")
-        .doc(primaryFamilyId)
-        .collection("members")
-        .doc(authUser.uid)
-        .set({
-          uid: authUser.uid,
-          role: "member",
-          email,
-          fullName,
-          addedAt: now,
-          joinedAt: now,
-        });
+      await prisma.familyMember.upsert({
+        where: { familyId_uid: { familyId: primaryFamilyId, uid } },
+        create: { familyId: primaryFamilyId, uid, role: 'member', fullName, email, addedAt: now },
+        update: { role: 'member', fullName, email },
+      });
     }
 
-    return NextResponse.json({ uid: authUser.uid }, { status: 201 });
+    return NextResponse.json({ uid }, { status: 201 });
   } catch (error: any) {
-    console.error("POST /api/admin/users failed:", error);
-    return NextResponse.json({ error: error?.message || "Failed to create user." }, { status: 500 });
+    console.error('POST /api/admin/users failed:', error);
+    return NextResponse.json({ error: error?.message || 'Failed to create user.' }, { status: 500 });
   }
 }

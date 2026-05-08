@@ -17,7 +17,6 @@ import {
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
-import { auth } from '@/lib/firebase';
 import { useAuthContext } from '@/components/AuthProvider';
 import { useToast } from '@/components/NextAdmin/ui/toast';
 import { cachedFetch, cacheInvalidate } from '@/utils/clientCache';
@@ -33,7 +32,7 @@ export default function ExpenseTypesPage() {
   const { currentFamilyId } = useAuthContext();
 
   const getAuthHeaders = async () => {
-    const token = await auth.currentUser?.getIdToken();
+    const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null;
     if (!token) throw new Error('Authentication token is missing.');
     return {
       'Content-Type': 'application/json',

@@ -1,57 +1,42 @@
-import { createUserWithEmailAndPassword, updateProfile } from "firebase/auth";
-import { auth, db } from "@/lib/firebase";
-import {
-  doc,
-  setDoc,
-  writeBatch,
-  collection,
-} from "firebase/firestore";
-
-export async function registerUser({ email, password, fullName }: { email: string, password: string, fullName: string }) {
-  // 1. Create Auth user
-  const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-  const { uid } = userCredential.user;
-  await updateProfile(userCredential.user, { displayName: fullName });
-
-  // 2. Create new family
-  const familyRef = doc(collection(db, "families"));
-  const familyId = familyRef.id;
-
-  // 3. Prepare batched writes
-  const batch = writeBatch(db);
-
-  // 3a. families/{familyId}
-  batch.set(familyRef, {
-    name: "My Family",
-    createdAt: new Date().toISOString(),
-    createdBy: uid,
+export async function registerUser({
+  fullName,
+  username,
+  userId,
+  email,
+  password,
+}: {
+  fullName: string;
+  username: string;
+  userId: string;
+  email: string;
+  password: string;
+}) {
+  const res = await fetch('/api/auth/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fullName, username, userId, email, password }),
   });
 
-  // 3b. families/{familyId}/members/{uid}
-  batch.set(doc(db, `families/${familyId}/members/${uid}`), {
-    role: "admin",
-    joinedAt: new Date().toISOString(),
-    email,
-    fullName,
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data?.error || 'Registration failed.');
+  }
+
+  // Auto sign in after register
+  const loginRes = await fetch('/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ identifier: email, password }),
   });
 
-  // 3c. system_users/{uid}
-  batch.set(doc(db, `system_users/${uid}`), {
-    email,
-    status: "active",
-    families: { [familyId]: "admin" },
-    createdAt: new Date().toISOString(),
-    fullName,
-  });
+  const loginData = await loginRes.json();
+  if (!loginRes.ok) {
+    throw new Error(loginData?.error || 'Login after registration failed.');
+  }
 
-  // 3d. families/{familyId}/settings/config
-  batch.set(doc(db, `families/${familyId}/settings/config`), {
-    expenseTypes: [],
-    incomeTypes: [],
-  });
+  if (typeof window !== 'undefined') {
+    localStorage.setItem('authToken', loginData.token);
+  }
 
-  // 4. Commit batch
-  await batch.commit();
-
-  return { uid, familyId };
+  return { uid: data.uid, familyId: null };
 }
