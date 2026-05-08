@@ -1,12 +1,13 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import dayjs from "dayjs";
-import { getBankReportData, hasBankReportCache, onBankReportUpdate } from "@/services/charts.services";
+import { getBankReportData, hasBankReportCache, onBankReportUpdate, rebuildBankReportData } from "@/services/charts.services";
 import { Skeleton, Checkbox } from "@mui/material";
 import PrintIcon from '@mui/icons-material/Print';
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
+import UploadFileIcon from '@mui/icons-material/UploadFile';
 import {
   Table,
   TableBody,
@@ -43,6 +44,16 @@ export default function MonthlyReportPage() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('active');
   const [dateFilter, setDateFilter] = useState<string | null>(null);
+  const [rebuilding, setRebuilding] = useState(false);
+
+  // --- Import state ---
+  const [importOpen, setImportOpen] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importStep, setImportStep] = useState<'upload' | 'preview' | 'done'>('upload');
+  const [importTxns, setImportTxns] = useState<any[]>([]);
+  const [selectedImportIds, setSelectedImportIds] = useState<Set<string>>(new Set());
+  const [importError, setImportError] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const months = useMemo(() => [
     "January", "February", "March", "April", "May", "June",
@@ -86,12 +97,15 @@ export default function MonthlyReportPage() {
     });
   }, [allTransactions, statusFilter]);
 
-  // Derive summary stats from the filtered list
+  // Derive summary stats from the filtered list — only USD affects the balance
+  // (KHR transactions go through the bank but are stored in KHR; the bank statement
+  //  shows their USD equivalent, so we must exclude KHR amounts from USD calculations)
   const stats = useMemo(() => {
     let monthlyIncome = 0, monthlyAmount = 0;
     const categoryTotals: Record<string, number> = {};
     monthlyTransactionsList.forEach((item: any) => {
       if (item.isFuture) return;
+      if ((item.Currency || 'USD') !== 'USD') return; // skip KHR — bank account is USD
       if (item.Type === 'Income') monthlyIncome += item.Amount;
       else {
         monthlyAmount += item.Amount;
@@ -114,6 +128,7 @@ export default function MonthlyReportPage() {
   const dailyStats = useMemo(() => {
     const result = { debit: 0, credit: 0 };
     filteredTransactions.forEach((item: any) => {
+      if ((item.Currency || 'USD') !== 'USD') return;
       if (item.Type === "Income") result.debit += item.Amount;
       else result.credit += item.Amount;
     });
@@ -124,6 +139,7 @@ export default function MonthlyReportPage() {
     return monthlyTransactionsList
       .filter((item: any) => selectedIds.includes(item.id))
       .reduce((acc: number, item: any) => {
+        if ((item.Currency || 'USD') !== 'USD') return acc;
         return item.Type === "Income" ? acc + item.Amount : acc - item.Amount;
       }, 0);
   }, [monthlyTransactionsList, selectedIds]);
@@ -160,6 +176,87 @@ export default function MonthlyReportPage() {
     }
   };
 
+  const handleRebuild = async () => {
+    if (!currentFamilyId || rebuilding) return;
+    setRebuilding(true);
+    try {
+      const data = await rebuildBankReportData(currentFamilyId, bankId, year, month);
+      setAllTransactions(data.transactions || []);
+      setStartingBalance(data.startingBalance || 0);
+    } catch (error) {
+      console.error("Rebuild error:", error);
+    } finally {
+      setRebuilding(false);
+    }
+  };
+
+  // --- Import handlers ---
+  const handleImportFile = async (file: File) => {
+    if (!currentFamilyId) return;
+    setImporting(true);
+    setImportError('');
+    try {
+      const { auth } = await import('@/lib/firebase');
+      const token = await auth.currentUser?.getIdToken();
+      const form = new FormData();
+      form.append('file', file);
+      form.append('bankId', bankId);
+      const res = await fetch(`/api/families/${currentFamilyId}/import/bank-statement`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: form,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Parse failed');
+      setImportTxns(data.transactions || []);
+      // Pre-select all non-duplicate transactions
+      setSelectedImportIds(new Set(
+        (data.transactions || []).filter((t: any) => !t.isDuplicate).map((t: any) => t.id)
+      ));
+      setImportStep('preview');
+    } catch (err: any) {
+      setImportError(err.message || 'Failed to parse PDF');
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const handleConfirmImport = async () => {
+    if (!currentFamilyId || !selectedImportIds.size) return;
+    setImporting(true);
+    setImportError('');
+    try {
+      const { auth } = await import('@/lib/firebase');
+      const token = await auth.currentUser?.getIdToken();
+      const toImport = importTxns.filter(t => selectedImportIds.has(t.id));
+      const res = await fetch(`/api/families/${currentFamilyId}/import/bank-statement/confirm`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transactions: toImport, bankId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Import failed');
+      setImportStep('done');
+      // Reload current month data
+      const fresh = await rebuildBankReportData(currentFamilyId, bankId, year, month);
+      setAllTransactions(fresh.transactions || []);
+      setStartingBalance(fresh.startingBalance || 0);
+    } catch (err: any) {
+      setImportError(err.message || 'Import failed');
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const closeImport = () => {
+    setImportOpen(false);
+    setImportStep('upload');
+    setImportTxns([]);
+    setSelectedImportIds(new Set());
+    setImportError('');
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
   if (loading && allTransactions.length === 0) {
     return (
       <div className="space-y-6 p-6">
@@ -183,6 +280,7 @@ export default function MonthlyReportPage() {
   };
 
   return (
+    <>
     <div className="mx-auto w-full max-w-7xl space-y-8 p-4 md:p-8 print:p-0 animate-fade-in">
 
       {/* --- Header Section --- */}
@@ -241,6 +339,20 @@ export default function MonthlyReportPage() {
           >
             {years.map(y => <option key={y} value={y}>{y}</option>)}
           </select>
+          <button
+            onClick={() => { setImportOpen(true); setImportStep('upload'); }}
+            className="ml-2 flex items-center gap-2 bg-success text-white px-4 py-2 rounded-xl text-sm font-bold hover:opacity-90 transition-all"
+          >
+            <UploadFileIcon fontSize="small" />
+            Import
+          </button>
+          <button
+            onClick={handleRebuild}
+            disabled={rebuilding}
+            className="ml-2 flex items-center gap-2 bg-warning text-white px-4 py-2 rounded-xl text-sm font-bold hover:opacity-90 transition-all disabled:opacity-50"
+          >
+            {rebuilding ? "Rebuilding..." : "Rebuild"}
+          </button>
           <button
             onClick={() => window.print()}
             className="ml-2 flex items-center gap-2 bg-dark dark:bg-white text-white dark:text-dark px-4 py-2 rounded-xl text-sm font-bold hover:opacity-90 transition-all"
@@ -417,7 +529,11 @@ export default function MonthlyReportPage() {
                   let runningBalance = stats.startingBalance || 0;
                   return monthlyTransactionsList?.map((item: any, idx: number) => {
                     const isIncome = item.Type === "Income";
-                    isIncome ? runningBalance += item.Amount : runningBalance -= item.Amount;
+                    const isUSD = (item.Currency || 'USD') === 'USD';
+                    // Only USD transactions affect the running balance (bank account is USD)
+                    if (isUSD) {
+                      isIncome ? runningBalance += item.Amount : runningBalance -= item.Amount;
+                    }
 
                     if (dateFilter && item.Date !== dateFilter) return null;
 
@@ -429,7 +545,8 @@ export default function MonthlyReportPage() {
                         className={cn(
                           "hover:bg-gray-50/50 dark:hover:bg-white/5 transition-colors cursor-pointer",
                           isSelected ? "bg-primary/5 dark:bg-primary/10" : "",
-                          item.isFuture && "opacity-40 grayscale italic"
+                          item.isFuture && "opacity-40 grayscale italic",
+                          !isUSD && "opacity-60"
                         )}
                         onClick={() => handleSelectRow(item.id, !isSelected)}
                       >
@@ -449,7 +566,9 @@ export default function MonthlyReportPage() {
                         </TableCell>
                         <TableCell className="text-right text-xs font-bold text-emerald-500">{isIncome ? `+${formatValue(item.Amount, item.Currency)}` : ""}</TableCell>
                         <TableCell className="text-right text-xs font-bold text-rose-500">{!isIncome ? `-${formatValue(item.Amount, item.Currency)}` : ""}</TableCell>
-                        <TableCell className="text-right px-6 text-xs font-black">{formatValue(runningBalance)}</TableCell>
+                        <TableCell className="text-right px-6 text-xs font-black">
+                          {isUSD ? formatValue(runningBalance) : <span className="text-[9px] font-bold text-orange-400 uppercase">KHR only</span>}
+                        </TableCell>
                       </TableRow>
                     );
                   });
@@ -506,5 +625,183 @@ export default function MonthlyReportPage() {
         </div>
       </div>
     </div>
+
+    {/* ─── Import Modal ─── */}
+    {importOpen && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+        <div className="relative w-full max-w-4xl max-h-[90vh] flex flex-col rounded-[32px] bg-white dark:bg-dark-2 shadow-2xl overflow-hidden">
+          {/* Header */}
+          <div className="flex items-center justify-between px-8 py-6 border-b border-stroke dark:border-white/10">
+            <div>
+              <h2 className="text-xl font-black">Import Bank Statement</h2>
+              <p className="text-xs text-gray-500 mt-1">
+                {importStep === 'upload' && 'Upload your Chip Mong Bank PDF statement'}
+                {importStep === 'preview' && `${importTxns.length} transactions parsed — select which to import`}
+                {importStep === 'done' && 'Import complete!'}
+              </p>
+            </div>
+            <button onClick={closeImport} className="text-gray-400 hover:text-gray-700 text-2xl font-bold leading-none">×</button>
+          </div>
+
+          {/* Body */}
+          <div className="flex-1 overflow-y-auto p-8">
+            {importError && (
+              <div className="mb-4 p-3 rounded-xl bg-danger/10 text-danger text-sm font-bold">{importError}</div>
+            )}
+
+            {/* Step 1: Upload */}
+            {importStep === 'upload' && (
+              <div
+                className="flex flex-col items-center justify-center border-2 border-dashed border-stroke dark:border-white/20 rounded-2xl p-16 cursor-pointer hover:border-primary transition-colors"
+                onClick={() => fileInputRef.current?.click()}
+                onDragOver={e => e.preventDefault()}
+                onDrop={e => {
+                  e.preventDefault();
+                  const f = e.dataTransfer.files[0];
+                  if (f?.type === 'application/pdf') handleImportFile(f);
+                }}
+              >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".pdf"
+                  className="hidden"
+                  onChange={e => { const f = e.target.files?.[0]; if (f) handleImportFile(f); }}
+                />
+                <UploadFileIcon className="text-primary opacity-50" style={{ fontSize: 64 }} />
+                <p className="mt-4 text-lg font-bold text-gray-600 dark:text-gray-300">
+                  {importing ? 'Parsing PDF...' : 'Click or drag & drop your PDF statement'}
+                </p>
+                <p className="mt-1 text-xs text-gray-400">Supports Chip Mong Bank statement format</p>
+                {importing && (
+                  <div className="mt-4 w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+                )}
+              </div>
+            )}
+
+            {/* Step 2: Preview */}
+            {importStep === 'preview' && (
+              <div>
+                {/* Summary bar */}
+                <div className="flex items-center gap-6 mb-4 p-4 rounded-2xl bg-gray-50 dark:bg-white/5 text-sm">
+                  <span className="font-bold">Total: <span className="text-primary">{importTxns.length}</span></span>
+                  <span className="font-bold text-success">New: {importTxns.filter(t => !t.isDuplicate).length}</span>
+                  <span className="font-bold text-warning">Possible duplicates: {importTxns.filter(t => t.isDuplicate).length}</span>
+                  <span className="font-bold">Selected: {selectedImportIds.size}</span>
+                  <button
+                    className="ml-auto text-xs font-bold text-primary underline"
+                    onClick={() => setSelectedImportIds(new Set(importTxns.filter(t => !t.isDuplicate).map((t: any) => t.id)))}
+                  >Select new only</button>
+                  <button
+                    className="text-xs font-bold text-primary underline"
+                    onClick={() => setSelectedImportIds(new Set(importTxns.map((t: any) => t.id)))}
+                  >Select all</button>
+                  <button
+                    className="text-xs font-bold text-gray-400 underline"
+                    onClick={() => setSelectedImportIds(new Set())}
+                  >Deselect all</button>
+                </div>
+
+                <div className="overflow-hidden rounded-2xl border border-stroke dark:border-white/5">
+                  <table className="w-full text-xs">
+                    <thead className="bg-gray-50 dark:bg-white/5">
+                      <tr>
+                        <th className="px-4 py-3 text-left">
+                          <Checkbox size="small"
+                            checked={selectedImportIds.size === importTxns.length && importTxns.length > 0}
+                            indeterminate={selectedImportIds.size > 0 && selectedImportIds.size < importTxns.length}
+                            onChange={e => setSelectedImportIds(e.target.checked ? new Set(importTxns.map((t: any) => t.id)) : new Set())}
+                          />
+                        </th>
+                        <th className="px-3 py-3 text-left font-black uppercase tracking-wider">Date</th>
+                        <th className="px-3 py-3 text-left font-black uppercase tracking-wider">Description</th>
+                        <th className="px-3 py-3 text-right font-black uppercase tracking-wider">Money In</th>
+                        <th className="px-3 py-3 text-right font-black uppercase tracking-wider">Money Out</th>
+                        <th className="px-3 py-3 text-right font-black uppercase tracking-wider">Balance</th>
+                        <th className="px-3 py-3 text-center font-black uppercase tracking-wider">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {importTxns.map(tx => (
+                        <tr
+                          key={tx.id}
+                          className={cn(
+                            'border-t border-stroke dark:border-white/5 cursor-pointer hover:bg-gray-50/50 dark:hover:bg-white/5',
+                            tx.isDuplicate && 'opacity-50',
+                            selectedImportIds.has(tx.id) && 'bg-primary/5'
+                          )}
+                          onClick={() => {
+                            const next = new Set(selectedImportIds);
+                            next.has(tx.id) ? next.delete(tx.id) : next.add(tx.id);
+                            setSelectedImportIds(next);
+                          }}
+                        >
+                          <td className="px-4 py-2" onClick={e => e.stopPropagation()}>
+                            <Checkbox size="small"
+                              checked={selectedImportIds.has(tx.id)}
+                              onChange={e => {
+                                const next = new Set(selectedImportIds);
+                                e.target.checked ? next.add(tx.id) : next.delete(tx.id);
+                                setSelectedImportIds(next);
+                              }}
+                            />
+                          </td>
+                          <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{dayjs(tx.date).format('DD MMM YYYY')}</td>
+                          <td className="px-3 py-2 max-w-[280px] truncate" title={tx.description}>{tx.description}</td>
+                          <td className="px-3 py-2 text-right font-bold text-emerald-500">{tx.moneyIn > 0 ? `+$${tx.moneyIn.toFixed(2)}` : ''}</td>
+                          <td className="px-3 py-2 text-right font-bold text-rose-500">{tx.moneyOut > 0 ? `-$${tx.moneyOut.toFixed(2)}` : ''}</td>
+                          <td className="px-3 py-2 text-right font-black">${tx.balance.toFixed(2)}</td>
+                          <td className="px-3 py-2 text-center">
+                            {tx.isDuplicate
+                              ? <span className="px-2 py-0.5 rounded-full bg-warning/10 text-warning text-[10px] font-bold">Duplicate</span>
+                              : <span className="px-2 py-0.5 rounded-full bg-success/10 text-success text-[10px] font-bold">New</span>
+                            }
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Step 3: Done */}
+            {importStep === 'done' && (
+              <div className="flex flex-col items-center justify-center py-16 gap-4">
+                <div className="text-6xl">✅</div>
+                <h3 className="text-xl font-black text-success">Import Successful!</h3>
+                <p className="text-gray-500 text-sm">{selectedImportIds.size} transactions imported and report rebuilt.</p>
+              </div>
+            )}
+          </div>
+
+          {/* Footer */}
+          {importStep !== 'done' && (
+            <div className="px-8 py-4 border-t border-stroke dark:border-white/10 flex justify-end gap-3">
+              <button onClick={closeImport} className="px-5 py-2 rounded-xl bg-gray-100 dark:bg-dark-3 text-sm font-bold hover:opacity-80">
+                Cancel
+              </button>
+              {importStep === 'preview' && (
+                <button
+                  onClick={handleConfirmImport}
+                  disabled={importing || selectedImportIds.size === 0}
+                  className="px-6 py-2 rounded-xl bg-primary text-white text-sm font-bold hover:opacity-90 disabled:opacity-50"
+                >
+                  {importing ? 'Importing...' : `Import ${selectedImportIds.size} Transactions`}
+                </button>
+              )}
+            </div>
+          )}
+          {importStep === 'done' && (
+            <div className="px-8 py-4 border-t border-stroke dark:border-white/10 flex justify-end">
+              <button onClick={closeImport} className="px-6 py-2 rounded-xl bg-primary text-white text-sm font-bold hover:opacity-90">
+                Close
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    )}
+    </>
   );
 }

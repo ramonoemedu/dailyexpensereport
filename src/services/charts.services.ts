@@ -405,6 +405,29 @@ export function onBankReportUpdate(cb: (familyId: string) => void): () => void {
   return () => bankReportListeners.delete(cb);
 }
 
+export async function rebuildBankReportData(
+  familyId: string,
+  bankId: string,
+  year: number,
+  month: number
+): Promise<{ transactions: any[]; startingBalance: number }> {
+  const key = bankReportCacheKey(familyId, bankId, year, month);
+  const token = await auth.currentUser?.getIdToken();
+  if (!token) throw new Error('Not authenticated');
+  const r = await fetch(
+    `/api/families/${familyId}/bank-report/${bankId}?year=${year}&month=${month}&rebuild=true`,
+    { cache: 'no-store', headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (!r.ok) {
+    const msg = await r.json().then(j => j.error).catch(() => r.statusText);
+    throw new Error(`Bank report rebuild error: ${msg}`);
+  }
+  const fresh = await r.json();
+  cacheWrite(key, fresh);
+  bankReportListeners.forEach(cb => cb(familyId));
+  return fresh;
+}
+
 export async function getBankReportData(
   familyId: string,
   bankId: string,
@@ -429,13 +452,22 @@ export async function getBankReportData(
   };
 
   if (cached) {
-    fetchFresh().then(fresh => {
-      const sig = (d: any) => d.transactions?.length + ':' + (d.startingBalance || 0);
-      if (sig(fresh) !== sig(cached)) {
-        cacheWrite(key, fresh);
-        bankReportListeners.forEach(cb => cb(familyId));
-      }
-    }).catch(() => {});
+    // Only background-revalidate if cache is older than 5 minutes
+    const cacheAge = Date.now() - (cached._cachedAt || 0);
+    if (cacheAge > 5 * 60_000) {
+      fetchFresh().then(fresh => {
+        const sig = (d: any) => {
+          const txns = d.transactions || [];
+          const totalOut = txns.reduce((s: number, t: any) => t.Type === 'Expense' && (t.Currency || 'USD') === 'USD' ? s + t.Amount : s, 0);
+          const totalIn = txns.reduce((s: number, t: any) => t.Type === 'Income' && (t.Currency || 'USD') === 'USD' ? s + t.Amount : s, 0);
+          return `${txns.length}:${d.startingBalance || 0}:${totalIn.toFixed(2)}:${totalOut.toFixed(2)}`;
+        };
+        if (sig(fresh) !== sig(cached)) {
+          cacheWrite(key, { ...fresh, _cachedAt: Date.now() });
+          bankReportListeners.forEach(cb => cb(familyId));
+        }
+      }).catch(() => {});
+    }
     return cached;
   }
 

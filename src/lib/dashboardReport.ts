@@ -170,7 +170,37 @@ export async function rebuildBankReport(
     .filter((b: any) => Number.isFinite(b.year) && Number.isFinite(b.month))
     .sort((a: any, b: any) => (a.year * 12 + a.month) - (b.year * 12 + b.month));
   const anchor = [...bankBalances].reverse().find((r: any) => r.year * 12 + r.month <= targetTime);
-  const startingBalance = anchor?.amount || 0;
+  let startingBalance = anchor?.amount || 0;
+
+  // Carry forward transactions from anchor month up to (but not including) target month
+  if (anchor && (anchor.year * 12 + anchor.month) < targetTime) {
+    const anchorMonthStart = `${anchor.year}-${String(anchor.month + 1).padStart(2, '0')}-01`;
+    const prevMonthDate = new Date(year, month, 0);
+    const prevMonthEnd = `${prevMonthDate.getFullYear()}-${String(prevMonthDate.getMonth() + 1).padStart(2, '0')}-${String(prevMonthDate.getDate()).padStart(2, '0')}`;
+
+    const carrySnap = await db
+      .collection('families').doc(familyId)
+      .collection('expenses')
+      .where('Date', '>=', anchorMonthStart)
+      .where('Date', '<=', prevMonthEnd)
+      .get();
+
+    carrySnap.docs.forEach(d => {
+      const raw = d.data();
+      if ((raw.status || 'active') !== 'active') return;
+
+      const method = String(raw['Payment Method'] || raw['Payment_Method'] || '');
+      if (!matchesBank(method, bankId)) return;
+
+      const currency = String(raw.Currency || 'USD');
+      if (currency !== 'USD') return;
+
+      const amount = Math.abs(Number(raw.Amount || raw.amount || 0));
+      const isIncome = String(raw.Type || raw.type || 'Expense') === 'Income';
+      if (isIncome) startingBalance += amount;
+      else startingBalance -= amount;
+    });
+  }
 
   const docRef = db.collection('families').doc(familyId)
     .collection('reports').doc(`bank_${bankId}_${year}`);

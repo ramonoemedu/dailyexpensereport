@@ -16,7 +16,7 @@ import {
 import { PAGE_SIZE, sanitizeKey, unsanitizeKey } from "@/utils/KeySanitizer";
 import { sendTelegramNotification, formatExpenseMessage } from "@/utils/telegramService";
 import { invalidateFamilyCache } from "@/services/charts.services";
-import { cacheRead, cacheWrite } from "@/utils/clientCache";
+import { cacheRead, cacheWrite, cacheInvalidate } from "@/utils/clientCache";
 
 // Module-level cache for dropdown/settings so Firestore isn't re-read on every mount
 type SettingsCacheEntry = {
@@ -431,8 +431,9 @@ export function useExpenseData(options?: {
         bankId: bankIdParam,
       });
 
-      const lsCacheKey = `expenses:${familyId}:${params.toString()}`;
-      const cached = cacheRead<any>(lsCacheKey, Infinity);
+      const cacheKey = `expenses:${familyId}:${params.toString()}`;
+      const TTL = 30_000; // 30 seconds — in-memory only, no localStorage
+      const cached = cacheRead<any>(cacheKey, TTL);
 
       const applyPayload = (payload: any) => {
         setServerRows(Array.isArray(payload?.rows) ? payload.rows : []);
@@ -442,39 +443,23 @@ export function useExpenseData(options?: {
         setServerUniqueDescriptions(Array.isArray(payload?.uniqueDescriptions) ? payload.uniqueDescriptions : []);
       };
 
-      // Serve from cache immediately (no spinner)
       if (cached) {
         applyPayload(cached);
         setLoading(false);
-      } else {
-        setLoading(true);
+        return; // fresh enough — skip the API call
       }
 
-      // Always fetch fresh from server (background if cached, blocking if not)
-      const doFetch = async () => {
-        try {
-          const res = await fetch(`/api/families/${familyId}/expenses?${params.toString()}`, { method: "GET", headers });
-          const payload = await res.json();
-          if (!res.ok) throw new Error(payload?.error || "Failed to fetch expenses.");
-
-          // Only update state and cache if data changed
-          const newSig = JSON.stringify({ rows: payload.rows, totalRows: payload.totalRows, stats: payload.stats });
-          const oldSig = cached ? JSON.stringify({ rows: cached.rows, totalRows: cached.totalRows, stats: cached.stats }) : null;
-          if (newSig !== oldSig) {
-            cacheWrite(lsCacheKey, payload);
-            applyPayload(payload);
-          }
-        } catch (err) {
-          console.error("Error fetching paginated rows:", err);
-        } finally {
-          setLoading(false);
-        }
-      };
-
-      if (cached) {
-        doFetch(); // fire-and-forget background refresh
-      } else {
-        await doFetch();
+      setLoading(true);
+      try {
+        const res = await fetch(`/api/families/${familyId}/expenses?${params.toString()}`, { method: "GET", headers, cache: 'no-store' });
+        const payload = await res.json();
+        if (!res.ok) throw new Error(payload?.error || "Failed to fetch expenses.");
+        cacheWrite(cacheKey, payload);
+        applyPayload(payload);
+      } catch (err) {
+        console.error("Error fetching paginated rows:", err);
+      } finally {
+        setLoading(false);
       }
     },
     [

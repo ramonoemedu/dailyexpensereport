@@ -23,8 +23,9 @@ export async function GET(
 
     let reportData = reportSnap.exists ? (reportSnap.data() as any) : null;
 
-    // Build on-demand if this month has no pre-computed data yet
-    if (!reportData?.months?.[month]) {
+    const forceRebuild = url.searchParams.get('rebuild') === 'true';
+    // Build on-demand if this month has no pre-computed data yet, or if forced
+    if (forceRebuild || !reportData?.months?.[month]) {
       await rebuildBankReport(familyId, bankId, year, month);
       const fresh = await db
         .collection('families').doc(familyId)
