@@ -65,14 +65,13 @@ export async function POST(req: NextRequest) {
         },
         settings: {
           create: {
-            familyId,
             config: {
               balances: [],
               cashBalances: [],
               expenseTypes: ['Food', 'Transportation', 'Utilities', 'Other'],
               incomeTypes: [],
               incomeConfigs: [],
-            },
+            } as any,
             updatedAt: now,
           },
         },

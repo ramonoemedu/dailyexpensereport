@@ -23,8 +23,8 @@ async function readConfig(familyId: string) {
 async function saveConfig(familyId: string, config: Record<string, unknown>, items: IncomeConfig[]) {
   await getPrisma().familySettings.upsert({
     where: { familyId },
-    create: { familyId, config: { ...config, incomeConfigs: items, updatedAt: new Date().toISOString() }, updatedAt: new Date() },
-    update: { config: { ...config, incomeConfigs: items, updatedAt: new Date().toISOString() }, updatedAt: new Date() },
+    create: { familyId, config: { ...config, incomeConfigs: items, updatedAt: new Date().toISOString() } as any, updatedAt: new Date() },
+    update: { config: { ...config, incomeConfigs: items, updatedAt: new Date().toISOString() } as any, updatedAt: new Date() },
   });
 }
 

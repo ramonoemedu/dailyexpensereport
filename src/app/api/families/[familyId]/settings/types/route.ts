@@ -10,8 +10,8 @@ async function getConfig(familyId: string) {
 async function saveConfig(familyId: string, config: Record<string, unknown>) {
   await getPrisma().familySettings.upsert({
     where: { familyId },
-    create: { familyId, config, updatedAt: new Date() },
-    update: { config, updatedAt: new Date() },
+    create: { familyId, config: config as any, updatedAt: new Date() },
+    update: { config: config as any, updatedAt: new Date() },
   });
 }
 
