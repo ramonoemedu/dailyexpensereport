@@ -55,4 +55,3 @@ networks:
 volumes:
   dailyexpense_pgdata:
 
-name: dailyexpensereport
