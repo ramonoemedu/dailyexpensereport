@@ -57,7 +57,7 @@ export default function LoginPage() {
       if (!res.ok) throw new Error(data?.error || 'Login failed.');
 
       localStorage.setItem('authToken', data.token);
-      router.push('/');
+      window.location.href = '/';
     } catch (err: any) {
       setError(err.message || 'Login failed.');
     } finally {
@@ -106,7 +106,7 @@ export default function LoginPage() {
       if (!loginRes.ok) throw new Error(loginData?.error || 'Login failed after registration.');
 
       localStorage.setItem('authToken', loginData.token);
-      router.push('/');
+      window.location.href = '/';
     } catch (err: any) {
       setError(err.message || 'Registration failed.');
     } finally {

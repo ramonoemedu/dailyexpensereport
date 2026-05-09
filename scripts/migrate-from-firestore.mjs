@@ -41,9 +41,13 @@ const { hash } = require('bcryptjs');
 const { initializeApp, cert, getApps } = require('firebase-admin/app');
 const { getFirestore } = require('firebase-admin/firestore');
 
-const serviceAccountPath = path.join(__dirname, '..', 'serviceAccountKey.json');
+const serviceAccountPath =
+  existsSync(path.join(__dirname, '..', 'serviceAccountKeyProd.json'))
+    ? path.join(__dirname, '..', 'serviceAccountKeyProd.json')
+    : path.join(__dirname, '..', 'serviceAccountKey.json');
+
 if (!existsSync(serviceAccountPath)) {
-  console.error('ERROR: serviceAccountKey.json not found in project root.');
+  console.error('ERROR: serviceAccountKey.json (or serviceAccountKeyProd.json) not found in project root.');
   process.exit(1);
 }
 

@@ -52,8 +52,6 @@ jobs:
               cd /root/opt/traefik/project/dailyexpensereport &&
               echo "Pulling new image from Docker Hub..." &&
               docker compose pull app &&
-              echo "Running database migrations..." &&
-              docker compose run --rm app sh -c "node ./node_modules/prisma/build/index.js migrate deploy" &&
               echo "Recreating container with new image..." &&
               docker compose up -d --force-recreate app &&
               echo "Cleaning up old images..." &&
