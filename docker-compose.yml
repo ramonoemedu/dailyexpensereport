@@ -2,6 +2,8 @@
 # Place this file on your server at: /root/opt/traefik/project/dailyexpensereport/docker-compose.yml
 # Run: docker compose up -d
 
+version: "3.8"
+
 services:
   postgres:
     image: postgres:16-alpine
