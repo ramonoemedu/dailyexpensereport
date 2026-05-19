@@ -14,7 +14,7 @@
 
 - Only family members can read expenses and settings
 - Only editors/admins can write expenses
-- Only admins can manage members and settings
+- Only admins can manage members and settings ok
 
 Example:
 ```plaintext
