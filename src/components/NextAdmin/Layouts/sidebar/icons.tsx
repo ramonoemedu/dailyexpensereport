@@ -168,6 +168,26 @@ export function Authentication(props: PropsType) {
   );
 }
 
+export function Calculator(props: PropsType) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={24}
+      height={24}
+      viewBox="0 0 24 24"
+      fill="none"
+      {...props}
+    >
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M6.5 1.75A2.75 2.75 0 003.75 4.5v15A2.75 2.75 0 006.5 22.25h11a2.75 2.75 0 002.75-2.75v-15A2.75 2.75 0 0017.5 1.75h-11zM5.25 4.5c0-.69.56-1.25 1.25-1.25h11c.69 0 1.25.56 1.25 1.25V6.5h-13.5V4.5zm0 3.5h13.5v2.75h-13.5V8zm0 4.25h3v3h-3v-3zm4.5 0h3v3h-3v-3zm4.5 0h3v3h-3v-3zm-9 4.5h3v3h-1.75c-.69 0-1.25-.56-1.25-1.25v-1.75zm4.5 0h3v3h-3v-3zm4.5 0h3v1.75c0 .69-.56 1.25-1.25 1.25h-1.75v-3z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
 export function ArrowLeftIcon(props: PropsType) {
   return (
     <svg

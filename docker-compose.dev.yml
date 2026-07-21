@@ -1,0 +1,24 @@
+# Local dev-only Postgres. Not used in production (see docker-compose.yml).
+# Run: docker compose -f docker-compose.dev.yml up -d
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: dailyexpense-postgres-dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: devpassword
+      POSTGRES_DB: dailyexpense
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d dailyexpense']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - dailyexpense_pgdata_dev:/var/lib/postgresql/data
+
+volumes:
+  dailyexpense_pgdata_dev:

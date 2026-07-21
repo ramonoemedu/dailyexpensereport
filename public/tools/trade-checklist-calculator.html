@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="km">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trade Checklist Calculator — Ramon</title>
+<link href="https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --desk:#E8ECF1;        /* dealing-desk gray-blue */
+    --card:#FFFFFF;
+    --ink:#17263B;         /* navy ink */
+    --muted:#5B6B80;
+    --line:#D4DBE4;
+    --buy:#0E7C66;         /* teal */
+    --buy-soft:#E2F3EF;
+    --sell:#C13A3A;        /* crimson */
+    --sell-soft:#F9E8E8;
+    --wait:#B07A1E;        /* amber */
+    --wait-soft:#F7EEDC;
+    --mono:'IBM Plex Mono',monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    font-family:'Kantumruy Pro','Noto Sans Khmer',sans-serif;
+    background:var(--desk);
+    color:var(--ink);
+    min-height:100vh;
+    padding:20px 14px 60px;
+  }
+  .sheet{max-width:560px;margin:0 auto}
+
+  /* header */
+  .masthead{display:flex;align-items:baseline;justify-content:space-between;border-bottom:3px solid var(--ink);padding-bottom:10px;margin-bottom:18px}
+  .masthead h1{font-size:19px;font-weight:700;letter-spacing:.2px}
+  .masthead .sub{font-size:12px;color:var(--muted)}
+
+  /* symbol toggle */
+  .sym-row{display:flex;gap:8px;margin-bottom:18px}
+  .sym{flex:1;padding:11px 0;text-align:center;font-family:var(--mono);font-weight:600;font-size:14px;
+       background:var(--card);border:1.5px solid var(--line);border-radius:10px;cursor:pointer;color:var(--muted);transition:.15s}
+  .sym.active{border-color:var(--ink);color:var(--ink);box-shadow:inset 0 -3px 0 var(--ink)}
+
+  /* step cards */
+  .step{background:var(--card);border:1.5px solid var(--line);border-radius:14px;padding:16px 16px 14px;margin-bottom:14px}
+  .step-head{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+  .step-tag{font-family:var(--mono);font-size:11px;font-weight:700;background:var(--ink);color:#fff;border-radius:6px;padding:3px 8px;letter-spacing:.5px}
+  .step-head h2{font-size:15px;font-weight:600}
+  .step-head .en{font-size:11px;color:var(--muted);font-weight:400}
+
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .grid .full{grid-column:1/-1}
+  label{display:block;font-size:12.5px;color:var(--muted);margin-bottom:4px}
+  input[type=number]{
+    width:100%;padding:10px 11px;font-family:var(--mono);font-size:15px;font-weight:600;color:var(--ink);
+    border:1.5px solid var(--line);border-radius:9px;background:#FAFBFC;
+  }
+  input[type=number]:focus{outline:2px solid var(--ink);outline-offset:1px;border-color:var(--ink)}
+
+  /* rsi direction toggle */
+  .dir-row{display:flex;gap:8px;margin-top:2px}
+  .dir{flex:1;padding:9px 0;text-align:center;font-size:13px;border:1.5px solid var(--line);border-radius:9px;background:#FAFBFC;cursor:pointer;color:var(--muted)}
+  .dir.up.active{border-color:var(--buy);color:var(--buy);background:var(--buy-soft);font-weight:600}
+  .dir.down.active{border-color:var(--sell);color:var(--sell);background:var(--sell-soft);font-weight:600}
+
+  /* inline result strip inside steps */
+  .strip{margin-top:12px;border-radius:9px;padding:9px 12px;font-size:13.5px;display:none}
+  .strip.show{display:block}
+  .strip.buy{background:var(--buy-soft);color:var(--buy)}
+  .strip.sell{background:var(--sell-soft);color:var(--sell)}
+  .strip.wait{background:var(--wait-soft);color:var(--wait)}
+
+  /* verdict stamp — signature element */
+  .verdict-wrap{margin:22px 0;display:flex;justify-content:center;min-height:96px;align-items:center}
+  .stamp{
+    font-family:var(--mono);font-weight:700;font-size:30px;letter-spacing:2px;
+    padding:14px 34px;border:4px double currentColor;border-radius:10px;
+    transform:rotate(-3deg);text-align:center;line-height:1.15;
+    transition:transform .18s ease;
+  }
+  .stamp small{display:block;font-family:'Kantumruy Pro',sans-serif;font-size:13px;font-weight:600;letter-spacing:0;margin-top:4px}
+  .stamp.buy{color:var(--buy)}
+  .stamp.sell{color:var(--sell)}
+  .stamp.wait{color:var(--wait)}
+  @media (prefers-reduced-motion:no-preference){
+    .stamp.pop{animation:pop .25s ease}
+    @keyframes pop{0%{transform:rotate(-3deg) scale(.85)}70%{transform:rotate(-3deg) scale(1.06)}100%{transform:rotate(-3deg) scale(1)}}
+  }
+
+  /* levels table */
+  .levels{display:none;background:var(--card);border:1.5px solid var(--line);border-radius:14px;overflow:hidden;margin-bottom:14px}
+  .levels.show{display:block}
+  .levels table{width:100%;border-collapse:collapse}
+  .levels td{padding:12px 16px;font-size:14px;border-top:1px solid var(--line)}
+  .levels tr:first-child td{border-top:none}
+  .levels td.k{color:var(--muted);width:46%}
+  .levels td.v{font-family:var(--mono);font-weight:700;font-size:16px;text-align:right}
+  .levels td.v.entry{color:var(--ink)}
+  .levels td.v.sl{color:var(--sell)}
+  .levels td.v.tp{color:var(--buy)}
+  .levels .pips{font-size:11.5px;color:var(--muted);font-weight:500;display:block}
+
+  /* final gate checklist */
+  .gate{background:var(--card);border:1.5px solid var(--line);border-radius:14px;padding:16px;display:none}
+  .gate.show{display:block}
+  .gate h3{font-size:14px;margin-bottom:10px}
+  .gate label.chk{display:flex;gap:10px;align-items:flex-start;font-size:13.5px;color:var(--ink);margin-bottom:9px;cursor:pointer}
+  .gate input[type=checkbox]{width:18px;height:18px;margin-top:1px;accent-color:var(--ink);flex-shrink:0}
+  .gate .go{margin-top:6px;border-radius:9px;padding:10px 12px;font-size:14px;font-weight:600;text-align:center}
+  .gate .go.ok{background:var(--buy-soft);color:var(--buy)}
+  .gate .go.no{background:var(--wait-soft);color:var(--wait)}
+
+  .foot{margin-top:26px;font-size:11.5px;color:var(--muted);text-align:center;line-height:1.6}
+</style>
+</head>
+<body>
+<div class="sheet">
+
+  <div class="masthead">
+    <h1>Trade Checklist</h1>
+    <span class="sub">ក្បួន H1 + M15 · Demo practice</span>
+  </div>
+
+  <div class="sym-row" role="tablist" aria-label="Symbol">
+    <button class="sym active" id="symGold" onclick="setSymbol('XAUUSD')">XAUUSD</button>
+    <button class="sym" id="symEur" onclick="setSymbol('EURUSD')">EURUSD</button>
+  </div>
+
+  <!-- STEP 1 : H1 direction -->
+  <div class="step">
+    <div class="step-head">
+      <span class="step-tag">H1</span>
+      <h2>ទិសដៅ <span class="en">Direction</span></h2>
+    </div>
+    <div class="grid">
+      <div>
+        <label for="price">តម្លៃបច្ចុប្បន្ន (Current price)</label>
+        <input type="number" id="price" step="any" inputmode="decimal" placeholder="4015.15">
+      </div>
+      <div>
+        <label for="ema200h1">EMA 200 — H1</label>
+        <input type="number" id="ema200h1" step="any" inputmode="decimal" placeholder="4050.00">
+      </div>
+      <div class="full">
+        <label for="ema50h1">EMA 50 — H1</label>
+        <input type="number" id="ema50h1" step="any" inputmode="decimal" placeholder="4008.00">
+      </div>
+    </div>
+    <div class="strip" id="s1out"></div>
+  </div>
+
+  <!-- STEP 2 : M15 timing -->
+  <div class="step">
+    <div class="step-head">
+      <span class="step-tag">M15</span>
+      <h2>ពេលចូល <span class="en">Timing — RSI</span></h2>
+    </div>
+    <div class="grid">
+      <div>
+        <label for="rsi">RSI (14) ឥឡូវ</label>
+        <input type="number" id="rsi" step="any" inputmode="decimal" min="0" max="100" placeholder="57.4">
+      </div>
+      <div>
+        <label>RSI កំពុងទៅទិសណា?</label>
+        <div class="dir-row">
+          <button class="dir up" id="dirUp" onclick="setDir('up')">⬆ ឡើង</button>
+          <button class="dir down" id="dirDown" onclick="setDir('down')">⬇ ចុះ</button>
+        </div>
+      </div>
+    </div>
+    <div class="strip" id="s2out"></div>
+  </div>
+
+  <!-- STEP 3 : ATR & entry -->
+  <div class="step">
+    <div class="step-head">
+      <span class="step-tag">ATR</span>
+      <h2>ចម្ងាយ SL / TP <span class="en">Risk sizing</span></h2>
+    </div>
+    <div class="grid">
+      <div>
+        <label for="atr">ATR (14) — M15</label>
+        <input type="number" id="atr" step="any" inputmode="decimal" placeholder="6.10">
+      </div>
+      <div>
+        <label for="ema50m15">EMA 50 — M15 (Entry ស្វ័យប្រវត្តិ)</label>
+        <input type="number" id="ema50m15" step="any" inputmode="decimal" placeholder="4002.00">
+      </div>
+      <div>
+        <label for="lot">Lot (ក្បួនហាត់ = 0.01)</label>
+        <input type="number" id="lot" step="0.01" min="0.01" value="0.01" inputmode="decimal">
+      </div>
+      <div>
+        <label for="entry">Entry ផ្ទាល់ខ្លួន (ទទេ = auto)</label>
+        <input type="number" id="entry" step="any" inputmode="decimal" placeholder="auto">
+      </div>
+    </div>
+  </div>
+
+  <!-- VERDICT -->
+  <div class="verdict-wrap">
+    <div class="stamp wait" id="stamp">WAIT<small>បំពេញលេខខាងលើសិន</small></div>
+  </div>
+
+  <!-- LEVELS -->
+  <div class="levels" id="levels">
+    <table>
+      <tr id="actionRow" style="display:none"><td colspan="2" id="lvAction" style="font-family:var(--mono);font-weight:700;font-size:15px;text-align:center;padding:13px 10px"></td></tr>
+      <tr id="planNote" style="display:none"><td colspan="2" style="background:var(--wait-soft);color:var(--wait);font-size:12.5px;font-weight:600">📋 ផែនការ (PLAN) — រង់ចាំតម្លៃមកដល់ Entry + RSI ងាក + ទៀនបញ្ជាក់ ទើបចូល</td></tr>
+      <tr><td class="k">Entry <span class="pips" id="lvEntrySrc"></span></td><td class="v entry" id="lvEntry">—</td></tr>
+      <tr><td class="k">Stop Loss (ATR × 1.5)</td><td class="v sl" id="lvSL">—</td></tr>
+      <tr><td class="k">Take Profit (SL × 2)</td><td class="v tp" id="lvTP">—</td></tr>
+      <tr><td class="k">Risk : Reward</td><td class="v" id="lvRR">1 : 2</td></tr>
+    </table>
+  </div>
+
+  <!-- FINAL GATE -->
+  <div class="gate" id="gate">
+    <h3>ពិនិត្យចុងក្រោយ មុនចុច (ដោយភ្នែក)</h3>
+    <label class="chk"><input type="checkbox" class="g" onchange="gateCheck()"> ទៀនបដិសេធ/បញ្ជាក់ <b>បិទរួច</b> (Pin bar / Engulfing)</label>
+    <label class="chk"><input type="checkbox" class="g" onchange="gateCheck()"> TP មិនកាត់ទ្រនាប់/ជញ្ជាំងខ្លាំង (R:R ពិត ≥ 1:1.5)</label>
+    <label class="chk"><input type="checkbox" class="g" onchange="gateCheck()"> គ្មាន news ក្រហម USD ±30 នាទី</label>
+    <label class="chk"><input type="checkbox" class="g" onchange="gateCheck()"> ថ្ងៃនេះ &lt; 3 trades ហើយមិនខាត 2 ជាប់គ្នា</label>
+    <div class="go no" id="goBox">☐ ធីកទាំង 4 សិន ទើបចូល</div>
+  </div>
+
+  <div class="foot">
+    Lot 0.01 · Demo practice tool · ក្បួន៖ H1 ទិស → RSI ពេល → ទៀនបញ្ជាក់ → ATR ចម្ងាយ<br>
+    ខ្វះលក្ខខណ្ឌណាមួយ = WAIT ។ ខក ល្អជាងខុស 🙂
+  </div>
+</div>
+
+<script>
+let symbol='XAUUSD';
+let rsiDir=null;
+
+const $=id=>document.getElementById(id);
+const fields=['price','ema200h1','ema50h1','rsi','atr','ema50m15','lot','entry'];
+fields.forEach(f=>$(f).addEventListener('input',calc));
+
+function setSymbol(s){
+  symbol=s;
+  $('symGold').classList.toggle('active',s==='XAUUSD');
+  $('symEur').classList.toggle('active',s==='EURUSD');
+  const g=s==='XAUUSD';
+  $('price').placeholder=g?'4015.15':'1.14406';
+  $('ema200h1').placeholder=g?'4050.00':'1.14250';
+  $('ema50h1').placeholder=g?'4008.00':'1.14400';
+  $('atr').placeholder=g?'6.10':'0.00048';
+  $('ema50m15').placeholder=g?'4002.00':'1.14400';
+  $('entry').placeholder='auto';
+  calc();
+}
+function setDir(d){
+  rsiDir=d;
+  $('dirUp').classList.toggle('active',d==='up');
+  $('dirDown').classList.toggle('active',d==='down');
+  calc();
+}
+function fmt(v){return symbol==='XAUUSD'?v.toFixed(2):v.toFixed(5);}
+function pips(v){
+  const lotEl=$('lot');
+  let lot=parseFloat(lotEl.value);if(isNaN(lot)||lot<=0)lot=0.01;
+  lotEl.style.borderColor=lot>0.02?'var(--sell)':'var(--line)';
+  if(symbol==='XAUUSD'){
+    const pl=v*lot*100; /* 0.01 lot gold = 1 oz */
+    return '$'+v.toFixed(2)+' · P&L ≈ $'+pl.toFixed(2)+' ('+lot.toFixed(2)+' lot)';
+  }
+  const p=v*10000, pl=p*lot*10; /* 0.01 lot EUR: 1 pip = $0.10 */
+  return p.toFixed(1)+' pips · P&L ≈ $'+pl.toFixed(2)+' ('+lot.toFixed(2)+' lot)';
+}
+function strip(id,cls,msg){
+  const el=$(id);
+  el.className='strip show '+cls;
+  el.innerHTML=msg;
+}
+function hideStrip(id){$(id).className='strip';}
+
+function calc(){
+  const price=parseFloat($('price').value);
+  const e200=parseFloat($('ema200h1').value);
+  const e50=parseFloat($('ema50h1').value);
+  const rsi=parseFloat($('rsi').value);
+  const atr=parseFloat($('atr').value);
+  const entryIn=parseFloat($('entry').value);
+  const entry=isNaN(entryIn)?price:entryIn;
+
+  let bias=null, timing=false, reason='';
+
+  /* ---- STEP 1 : H1 bias ---- */
+  if(!isNaN(price)&&!isNaN(e200)){
+    const gap=Math.abs(price-e200);
+    const emaGap=isNaN(e50)?null:Math.abs(e50-e200);
+    const nearRef=isNaN(atr)?gap+1:atr; /* need ATR to judge "near" */
+
+    if(emaGap!==null&&!isNaN(atr)&&emaGap<atr){
+      bias='range';
+      strip('s1out','wait','⚠ EMA 50 និង 200 ជិតគ្នាពេក (ឃ្លាត < ATR) → ទីផ្សារផ្តេក → WAIT');
+    }else if(!isNaN(atr)&&gap<nearRef){
+      bias='battle';
+      strip('s1out','wait','⚠ តម្លៃជិត EMA 200 H1 ពេក (តំបន់ប្រយុទ្ធ) → រង់ចាំច្រានចេញច្បាស់');
+    }else if(price>e200){
+      bias='buy';
+      strip('s1out','buy','✔ តម្លៃលើ EMA 200 H1 → ថ្ងៃនេះរកតែ BUY');
+    }else{
+      bias='sell';
+      strip('s1out','sell','✔ តម្លៃក្រោម EMA 200 H1 → ថ្ងៃនេះរកតែ SELL');
+    }
+  }else hideStrip('s1out');
+
+  /* ---- STEP 2 : RSI timing ---- */
+  if(!isNaN(rsi)&&rsiDir&&(bias==='buy'||bias==='sell')){
+    if(bias==='sell'){
+      if(rsi>=55&&rsi<=68&&rsiDir==='down'){timing=true;strip('s2out','sell','✔ RSI '+rsi+' ក្នុងតំបន់ 55–65 ហើយងាកចុះ → តំបន់ SELL — រង់ចាំទៀនបដិសេធ');}
+      else if(rsi>=55&&rsiDir==='up'){strip('s2out','wait','⏳ RSI ដល់តំបន់ហើយ ប៉ុន្តែនៅឡើង → រង់ចាំវាងាកចុះសិន');}
+      else if(rsi<45){strip('s2out','wait','⏳ RSI ទាប — លក់ឥឡូវយឺតពេក → រង់ចាំ pullback ឡើង 55–60');}
+      else{strip('s2out','wait','⏳ RSI កណ្តាល — គ្មានសញ្ញា → រង់ចាំ');}
+    }else{
+      if(rsi>=32&&rsi<=45&&rsiDir==='up'){timing=true;strip('s2out','buy','✔ RSI '+rsi+' ក្នុងតំបន់ 35–45 ហើយងាកឡើង → តំបន់ BUY — រង់ចាំទៀនបញ្ជាក់');}
+      else if(rsi<=45&&rsiDir==='down'){strip('s2out','wait','⏳ RSI ដល់តំបន់ហើយ ប៉ុន្តែនៅចុះ → រង់ចាំវាងាកឡើងសិន');}
+      else if(rsi>55){strip('s2out','wait','⏳ RSI ខ្ពស់ — ទិញឥឡូវដេញថ្លៃពេក → រង់ចាំ pullback ចុះ 40–45');}
+      else{strip('s2out','wait','⏳ RSI កណ្តាល — គ្មានសញ្ញា → រង់ចាំ');}
+    }
+  }else if(bias==='range'||bias==='battle'){
+    hideStrip('s2out');
+  }else hideStrip('s2out');
+
+  /* ---- VERDICT + LEVELS ---- */
+  const e50m15=parseFloat($('ema50m15').value);
+  const stamp=$('stamp');
+  const levels=$('levels');
+  const gate=$('gate');
+  stamp.classList.remove('pop');
+  void stamp.offsetWidth;
+
+  /* resolve entry: manual > (timing? current price : nearest wall on the CORRECT side) */
+  let useEntry=NaN, entrySrc='', wrongSide=false;
+  const sideOK=(lvl)=>!isNaN(price)?(bias==='sell'?lvl>price:lvl<price):true;
+  if(!isNaN(entryIn)){useEntry=entryIn;entrySrc='ផ្ទាល់ខ្លួន';}
+  else if(timing&&!isNaN(price)){useEntry=price;entrySrc='= តម្លៃឥឡូវ';}
+  else if(!isNaN(e50m15)&&sideOK(e50m15)){useEntry=e50m15;entrySrc='= EMA 50 M15 (pullback)';}
+  else if(!isNaN(e50)&&sideOK(e50)){useEntry=e50;entrySrc='= EMA 50 H1 (ជញ្ជាំង)';}
+  else if(!isNaN(e50m15)||!isNaN(e50)){wrongSide=true;}
+
+  const canCalc=(bias==='buy'||bias==='sell')&&!isNaN(atr)&&!isNaN(useEntry);
+
+  if(canCalc){
+    const slDist=atr*1.5, tpDist=slDist*2;
+    const isBuy=bias==='buy';
+    const sl=isBuy?useEntry-slDist:useEntry+slDist;
+    const tp=isBuy?useEntry+tpDist:useEntry-tpDist;
+
+    $('lvEntry').textContent=fmt(useEntry);
+    $('lvEntrySrc').textContent=entrySrc;
+    $('lvSL').innerHTML=fmt(sl)+'<span class="pips">−'+pips(slDist)+'</span>';
+    $('lvTP').innerHTML=fmt(tp)+'<span class="pips">+'+pips(tpDist)+'</span>';
+
+    const act=$('lvAction');
+    $('actionRow').style.display='';
+    act.style.background=isBuy?'var(--buy-soft)':'var(--sell-soft)';
+    act.style.color=isBuy?'var(--buy)':'var(--sell)';
+    act.innerHTML=(isBuy?'🔼 BUY (ទិញ) នៅ ':'🔽 SELL (លក់) នៅ ')+fmt(useEntry)
+      +'<br><span style="font-size:12.5px;font-weight:600">SL '+fmt(sl)+' · TP '+fmt(tp)+'</span>';
+    levels.classList.add('show');
+
+    if(timing){
+      /* live setup */
+      $('planNote').style.display='none';
+      stamp.className='stamp pop '+bias;
+      stamp.innerHTML=(isBuy?'BUY':'SELL')+'<small>'+(isBuy?'ត្រៀមទិញ — រង់ចាំទៀនបញ្ជាក់':'ត្រៀមលក់ — រង់ចាំទៀនបដិសេធ')+'</small>';
+      gate.classList.add('show');
+    }else{
+      /* plan-ahead mode */
+      $('planNote').style.display='';
+      stamp.className='stamp pop wait';
+      stamp.innerHTML='PLAN<small>'+(isBuy?'រង់ចាំតម្លៃចុះមក Entry + RSI ងាកឡើង':'រង់ចាំតម្លៃឡើងទៅ Entry + RSI ងាកចុះ')+'</small>';
+      gate.classList.remove('show');
+    }
+  }else{
+    let msg='បំពេញលេខខាងលើសិន';
+    if(bias==='range')msg='ទីផ្សារផ្តេក — គ្មាន trade';
+    else if(bias==='battle')msg='តំបន់ប្រយុទ្ធ EMA 200 — រង់ចាំ';
+    else if(wrongSide)msg='EMA នៅខាងខុសទិស — វាយ Entry ផ្ទាល់ខ្លួន (ជញ្ជាំង'+(bias==='sell'?'ខាងលើ':'ខាងក្រោម')+'តម្លៃ)';
+    else if(bias&&isNaN(atr))msg='បញ្ចូល ATR ដើម្បីគណនា SL/TP';
+    else if(bias&&!timing)msg='បញ្ចូល EMA 50 M15 → បានផែនការ Entry';
+    stamp.className='stamp pop wait';
+    stamp.innerHTML='WAIT<small>'+msg+'</small>';
+    $('actionRow').style.display='none';
+    levels.classList.remove('show');
+    gate.classList.remove('show');
+  }
+  gateCheck();
+}
+function gateCheck(){
+  const boxes=[...document.querySelectorAll('.g')];
+  const all=boxes.length&&boxes.every(b=>b.checked);
+  const go=$('goBox');
+  if(all){go.className='go ok';go.textContent='✔ លក្ខខណ្ឌពេញ — ចូលបាន (lot 0.01)';}
+  else{go.className='go no';go.textContent='☐ ធីកទាំង 4 សិន ទើបចូល';}
+}
+</script>
+</body>
+</html>

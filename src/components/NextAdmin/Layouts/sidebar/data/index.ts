@@ -99,6 +99,12 @@ export const NAV_DATA: NavSection[] = [
         ],
       },
       {
+        title: "Trade Checklist",
+        url: "/trade-checklist",
+        icon: Icons.Calculator,
+        items: [],
+      },
+      {
         title: "Settings",
         icon: Icons.FourCircle,
         items: [
