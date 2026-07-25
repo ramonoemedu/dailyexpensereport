@@ -100,6 +100,18 @@
   .levels td.v.tp{color:var(--buy)}
   .levels .pips{font-size:11.5px;color:var(--muted);font-weight:500;display:block}
 
+  /* pivot points table */
+  .pp-table{display:none;margin-top:10px;border-radius:9px;overflow:hidden;border:1px solid var(--line)}
+  .pp-table.show{display:block}
+  .pp-table table{width:100%;border-collapse:collapse}
+  .pp-table td{padding:7px 10px;font-size:12.5px;border-top:1px solid var(--line);font-family:var(--mono);font-weight:600}
+  .pp-table tr:first-child td{border-top:none}
+  .pp-table td.lbl{font-family:'Kantumruy Pro',sans-serif;font-weight:400;color:var(--muted);width:40%}
+  .pp-table tr.pp-row{background:#F2F4F7}
+  .pp-table tr.pp-row td{font-weight:700}
+  .pp-table tr.near{background:var(--wait-soft)}
+  .pp-table tr.near td{color:var(--wait)}
+
   /* final gate checklist */
   .gate{background:var(--card);border:1.5px solid var(--line);border-radius:14px;padding:16px;display:none}
   .gate.show{display:block}
@@ -171,7 +183,49 @@
     <div class="strip" id="s2out"></div>
   </div>
 
-  <!-- STEP 3 : ATR & entry -->
+  <!-- STEP 2.5 : Fibonacci confluence -->
+  <div class="step">
+    <div class="step-head">
+      <span class="step-tag">FIB</span>
+      <h2>Golden Zone <span class="en">Fibonacci — ស្រេចចិត្ត</span></h2>
+    </div>
+    <div class="grid">
+      <div>
+        <label for="swingLow">Swing Low (ចំណុចទាបបំផុត)</label>
+        <input type="number" id="swingLow" step="any" inputmode="decimal" placeholder="4062.00">
+      </div>
+      <div>
+        <label for="swingHigh">Swing High (ចំណុចខ្ពស់បំផុត)</label>
+        <input type="number" id="swingHigh" step="any" inputmode="decimal" placeholder="4178.00">
+      </div>
+    </div>
+    <div class="strip" id="fibout"></div>
+  </div>
+
+  <!-- STEP 2.7 : Pivot Points -->
+  <div class="step">
+    <div class="step-head">
+      <span class="step-tag">PP</span>
+      <h2>Pivot Points <span class="en">S/R ថ្ងៃនេះ — ស្រេចចិត្ត</span></h2>
+    </div>
+    <div class="grid">
+      <div>
+        <label for="ppHigh">High ថ្ងៃមុន (D1)</label>
+        <input type="number" id="ppHigh" step="any" inputmode="decimal" placeholder="4152.00">
+      </div>
+      <div>
+        <label for="ppLow">Low ថ្ងៃមុន (D1)</label>
+        <input type="number" id="ppLow" step="any" inputmode="decimal" placeholder="4088.00">
+      </div>
+      <div class="full">
+        <label for="ppClose">Close ថ្ងៃមុន (D1)</label>
+        <input type="number" id="ppClose" step="any" inputmode="decimal" placeholder="4090.00">
+      </div>
+    </div>
+    <div class="strip" id="ppout"></div>
+    <div class="pp-table" id="ppTable"></div>
+  </div>
+
   <div class="step">
     <div class="step-head">
       <span class="step-tag">ATR</span>
@@ -235,7 +289,7 @@ let symbol='XAUUSD';
 let rsiDir=null;
 
 const $=id=>document.getElementById(id);
-const fields=['price','ema200h1','ema50h1','rsi','atr','ema50m15','lot','entry'];
+const fields=['price','ema200h1','ema50h1','rsi','atr','ema50m15','swingLow','swingHigh','lot','entry','ppHigh','ppLow','ppClose'];
 fields.forEach(f=>$(f).addEventListener('input',calc));
 
 function setSymbol(s){
@@ -248,7 +302,12 @@ function setSymbol(s){
   $('ema50h1').placeholder=g?'4008.00':'1.14400';
   $('atr').placeholder=g?'6.10':'0.00048';
   $('ema50m15').placeholder=g?'4002.00':'1.14400';
+  $('swingLow').placeholder=g?'4062.00':'1.14060';
+  $('swingHigh').placeholder=g?'4178.00':'1.14500';
   $('entry').placeholder='auto';
+  $('ppHigh').placeholder=g?'4152.00':'1.14520';
+  $('ppLow').placeholder=g?'4088.00':'1.14180';
+  $('ppClose').placeholder=g?'4090.00':'1.14260';
   calc();
 }
 function setDir(d){
@@ -275,6 +334,37 @@ function strip(id,cls,msg){
   el.innerHTML=msg;
 }
 function hideStrip(id){$(id).className='strip';}
+
+function calcPivot(){
+  const h=parseFloat($('ppHigh').value), l=parseFloat($('ppLow').value), c=parseFloat($('ppClose').value);
+  const price=parseFloat($('price').value);
+  const atr=parseFloat($('atr').value);
+  const tbl=$('ppTable');
+  if(isNaN(h)||isNaN(l)||isNaN(c)||h<=l){tbl.classList.remove('show');hideStrip('ppout');return;}
+
+  const pp=(h+l+c)/3;
+  const r1=2*pp-l, s1=2*pp-h;
+  const r2=pp+(h-l), s2=pp-(h-l);
+  const r3=h+2*(pp-l), s3=l-2*(h-pp);
+  const rows=[['R3',r3],['R2',r2],['R1',r1],['PP',pp],['S1',s1],['S2',s2],['S3',s3]];
+
+  const nearRef=isNaN(atr)?null:atr*0.5; /* "close" = within half an ATR */
+  let html='<table>', nearMsg='';
+  rows.forEach(([lbl,val])=>{
+    let cls=lbl==='PP'?'pp-row':'';
+    if(!isNaN(price)&&nearRef!==null&&Math.abs(price-val)<=nearRef){
+      cls+=' near';
+      if(!nearMsg)nearMsg=lbl+' ('+fmt(val)+')';
+    }
+    html+='<tr class="'+cls.trim()+'"><td class="lbl">'+lbl+'</td><td style="text-align:right">'+fmt(val)+'</td></tr>';
+  });
+  html+='</table>';
+  tbl.innerHTML=html;
+  tbl.classList.add('show');
+
+  if(nearMsg) strip('ppout','wait','📍 តម្លៃឥឡូវជិត <b>'+nearMsg+'</b> (< ATR÷2) — ចាំមើលថាទប់ ឬច្រាន, ប្រៀបធៀបនឹងសញ្ញា RSI/ទៀន');
+  else hideStrip('ppout');
+}
 
 function calc(){
   const price=parseFloat($('price').value);
@@ -325,6 +415,27 @@ function calc(){
     hideStrip('s2out');
   }else hideStrip('s2out');
 
+  /* ---- STEP 2.5 : Fibonacci ---- */
+  const sLow=parseFloat($('swingLow').value), sHigh=parseFloat($('swingHigh').value);
+  let fibZoneLo=NaN, fibZoneHi=NaN;
+  if(!isNaN(sLow)&&!isNaN(sHigh)&&sHigh>sLow){
+    const range=sHigh-sLow;
+    const f382=sHigh-range*0.382, f500=sHigh-range*0.5, f618=sHigh-range*0.618;
+    fibZoneLo=f618; fibZoneHi=f382; /* golden zone, retracement measured from the high */
+    let msg='<b>Golden Zone (38.2%–61.8%): '+fmt(fibZoneLo)+' – '+fmt(fibZoneHi)+'</b><br>'
+      +'50% = '+fmt(f500);
+    const e50m15chk=parseFloat($('ema50m15').value);
+    if(!isNaN(e50m15chk)&&e50m15chk>=fibZoneLo&&e50m15chk<=fibZoneHi){
+      msg+='<br>✔ EMA 50 M15 ស្ថិតក្នុង Golden Zone — confluence ខ្លាំង!';
+      strip('fibout','buy',msg);
+    }else{
+      strip('fibout','wait',msg);
+    }
+  }else hideStrip('fibout');
+
+  /* ---- Pivot Points (info-only, does not affect verdict) ---- */
+  calcPivot();
+
   /* ---- VERDICT + LEVELS ---- */
   const e50m15=parseFloat($('ema50m15').value);
   const stamp=$('stamp');
@@ -336,11 +447,13 @@ function calc(){
   /* resolve entry: manual > (timing? current price : nearest wall on the CORRECT side) */
   let useEntry=NaN, entrySrc='', wrongSide=false;
   const sideOK=(lvl)=>!isNaN(price)?(bias==='sell'?lvl>price:lvl<price):true;
+  const fib618=fibZoneLo; /* deepest common pullback level */
   if(!isNaN(entryIn)){useEntry=entryIn;entrySrc='ផ្ទាល់ខ្លួន';}
   else if(timing&&!isNaN(price)){useEntry=price;entrySrc='= តម្លៃឥឡូវ';}
   else if(!isNaN(e50m15)&&sideOK(e50m15)){useEntry=e50m15;entrySrc='= EMA 50 M15 (pullback)';}
+  else if(!isNaN(fib618)&&sideOK(fib618)){useEntry=fib618;entrySrc='= Fib 61.8% (Golden Zone)';}
   else if(!isNaN(e50)&&sideOK(e50)){useEntry=e50;entrySrc='= EMA 50 H1 (ជញ្ជាំង)';}
-  else if(!isNaN(e50m15)||!isNaN(e50)){wrongSide=true;}
+  else if(!isNaN(e50m15)||!isNaN(e50)||!isNaN(fib618)){wrongSide=true;}
 
   const canCalc=(bias==='buy'||bias==='sell')&&!isNaN(atr)&&!isNaN(useEntry);
 
